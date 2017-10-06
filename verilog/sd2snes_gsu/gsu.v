@@ -71,6 +71,8 @@ reg [3:0] imm;
 reg [3:0] src_reg;
 reg [3:0] dst_reg;
 
+reg [7:0] cache [511:0];
+
 reg [8:0] cache_addra;
 reg [7:0] cache_dina;
 reg [0:0] cache_wea;
