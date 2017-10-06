@@ -101,8 +101,6 @@ reg [7:0] pipeline;
 reg [3:0] src_reg;
 reg [3:0] dst_reg;
 
-reg [16:0] res17;
-
 /* ROM/RAM bus access flags */
 assign ron = scmr[4];
 assign ran = scmr[3];
@@ -145,8 +143,6 @@ parameter STATE_IDLE    = 8'b00000001;
 parameter STATE_FETCH1  = 8'b00001000;
 parameter STATE_FETCH2  = 8'b00010000;
 parameter STATE_FETCH3  = 8'b00100000;
-parameter STATE_EXEC    = 8'b01000000;
-parameter STATE_WBACK   = 8'b10000000;
 
 parameter OP_ALT1 = 8'b00111101;
 parameter OP_ALT2 = 8'b00111110;
@@ -157,6 +153,12 @@ parameter OP_NOP  = 8'b00000001;
 parameter OP_IWT  = 8'b1111xxxx; // Also LM, SM
 reg [7:0] curr_op;
 
+/* clkin is either 4 or 8 times as fast as
+   instructions are executed */
+parameter CLK_COUNT_MAX_FAST = 3'h3;
+parameter CLK_COUNT_MAX_SLOW = 3'h7;
+reg [2:0] clk_count;
+
 initial begin: initial_blk
   reg [4:0] i;
   state = STATE_IDLE;
@@ -164,6 +166,7 @@ initial begin: initial_blk
     regs[i] = 16'h0000;
   end
   curr_op = OP_NOP;
+  clk_count = 3'h0;
 end
 
 always @(posedge clkin) begin
@@ -253,153 +256,158 @@ always @(posedge clkin) begin
       end
     end
     STATE_FETCH1: begin
-      if (cache_flag) begin
+      if ((clk_count == 3'h0) && cache_flag) begin
         // First, read first byte of instruction from cache
         curr_op <= cache_byte;
         casex (cache_byte)
           OP_ALT1: begin
             sfr[ALT1] <= 1'b1;
             sfr[ALT2] <= 1'b0;
-            state <= STATE_FETCH2;
-            regs[PC] <= regs[PC] + 1;
+            regs[PC] <= regs[PC] + 16'h1;
+
+            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
           OP_ALT2: begin
             sfr[ALT1] <= 1'b0;
             sfr[ALT2] <= 1'b1;
-            state <= STATE_FETCH2;
-            regs[PC] <= regs[PC] + 1;
+            regs[PC] <= regs[PC] + 16'h1;
+
+            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
           OP_ALT3: begin
             sfr[ALT1] <= 1'b1;
             sfr[ALT2] <= 1'b1;
-            state <= STATE_FETCH2;
-            regs[PC] <= regs[PC] + 1;
+            regs[PC] <= regs[PC] + 16'h1;
+
+            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
+          end
+          OP_ADX: begin: adx_blk
+            reg [15:0] res;
+
+            if (!alt1 && !alt2) begin
+              // ADD Rn
+              res = regs[src_reg] + regs[imm];
+            end
+            else if (alt1 && !alt2) begin
+              // ADC Rn
+              res = regs[src_reg] + regs[imm] + cy;
+            end
+            else if (!alt1 && alt2) begin
+              // ADD #n
+              res = regs[src_reg] + imm;
+            end
+            else /* if (alt1 && alt2) */ begin
+              // ADC #n
+              res = regs[src_reg] + imm + cy;
+            end
+
+            // Set flags
+            sfr[OV] <= (~(regs[src_reg] ^ (alt2 ? regs[imm] : imm))
+                  & ((alt2 ? regs[imm] : imm) ^ res)
+                  & 16'h8000) != 0;
+            sfr[S]  <= (res & 16'h8000) != 0;
+            sfr[CY] <= res >= 17'h10000;
+            sfr[Z]  <= (res & 16'hffff) == 0;
+
+            // Write the result
+            regs[dst_reg] <= res;
+
+            // Increment program counter if it was not set above
+            if (dst_reg != PC) begin
+              regs[PC] <= regs[PC] + 16'h1;
+            end
+
+            // Register reset
+            sfr[B]    <= 1'b0;
+            sfr[ALT1] <= 1'b0;
+            sfr[ALT2] <= 1'b0;
+            src_reg  <= 4'h0;
+            dst_reg  <= 4'h0;
+
+            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
           OP_IWT: begin
-            state <= STATE_FETCH2;
             immr4 <= imm;
-            regs[PC] <= regs[PC] + 1;
+            regs[PC] <= regs[PC] + 16'h1;
+
+            state <= STATE_FETCH2;
           end
-          default: state <= STATE_EXEC;
+          OP_NOP:  begin
+            // Just reset regs.
+            sfr[B] <= 1'b0;
+            sfr[ALT1] <= 1'b0;
+            sfr[ALT2] <= 1'b0;
+            src_reg <= 4'h0;
+            dst_reg <= 4'h0;
+
+            regs[PC] <= regs[PC] + 16'h1;
+
+            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
+          end
+          default: state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
         endcase
       end
     end
     STATE_FETCH2: begin
       // Wait until the second byte of the instruction is in the cache
-      if (cache_flag) begin
+      if ((clk_count == 3'h0) && cache_flag) begin
         casex (curr_op)
+          OP_BEQ:
+          begin: op_beq_blk
+            /*
+            reg signed [7:0] tmp;
+            tmp = pipeline;
+            regs[PC] <= regs[PC] + 16'h1;
+            //pipeline = 8'b1; // XXX: NOP for now. Should read.
+            //fetch_next_cached_insn;
+            if (z) begin
+              // XXX this is ugly!
+              regs[PC] <= $unsigned($signed(regs[PC]) + tmp);
+            end
+            */
+            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
+          end
           OP_IWT: begin
-            state <= STATE_FETCH3;
             immr8[0] <= cache_byte;
-            regs[PC] <= regs[PC] + 1;
+            regs[PC] <= regs[PC] + 16'h1;
+
+            state <= STATE_FETCH3;
           end
-          default: begin
-            // The normal case, after a prefix instruction
-            curr_op <= cache_byte;
-            state <= STATE_EXEC;
-          end
+          default: state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
         endcase
       end
     end
     STATE_FETCH3: begin
       // Wait until the third byte of the instruction is in the cache
-      if (cache_flag) begin
+      if ((clk_count == 3'h0) && cache_flag) begin
         casex (curr_op)
           OP_IWT: begin
-            immr8[1] <= cache_byte;
-            state <= STATE_WBACK;
+            regs[immr4] <= {immr8[0], cache_byte};
+            if (immr4 != PC) begin
+              regs[PC] <= regs[PC] + 16'h1;
+            end
+
+            // Register reset
+            sfr[B]    <= 1'b0;
+            sfr[ALT1] <= 1'b0;
+            sfr[ALT2] <= 1'b0;
+            src_reg  <= 4'h0;
+            dst_reg  <= 4'h0;
+
+            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
-          default: state <= STATE_EXEC;
+          default: state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
         endcase
       end
     end
-    STATE_EXEC: begin
-      casex (curr_op)
-        OP_NOP:  begin
-          // Just reset regs.
-          sfr[B] <= 1'b0;
-          sfr[ALT1] <= 1'b0;
-          sfr[ALT2] <= 1'b0;
-          src_reg <= 4'h0;
-          dst_reg <= 4'h0;
-        end
-        OP_ADX: begin
-          if (!alt1 && !alt2) begin
-            // ADD Rn
-            res17 <= regs[src_reg] + regs[imm];
-          end
-          else if (alt1 && !alt2) begin
-            // ADC Rn
-            res17 <= regs[src_reg] + regs[imm] + cy;
-          end
-          else if (!alt1 && alt2) begin
-            // ADD #n
-            res17 <= regs[src_reg] + imm;
-          end
-          else /* if (alt1 && alt2) */ begin
-            // ADC #n
-            res17 <= regs[src_reg] + imm + cy;
-          end
-        end
-        /*
-        OP_BEQ:
-        begin: op_beq_blk
-          reg signed [7:0] tmp;
-          tmp = pipeline;
-          regs[PC] <= regs[PC] + 1'b1;
-          //pipeline = 8'b1; // XXX: NOP for now. Should read.
-          //fetch_next_cached_insn;
-          if (z) begin
-            // XXX this is ugly!
-            regs[PC] <= $unsigned($signed(regs[PC]) + tmp);
-          end
-        end
-        */
-      endcase
-      state <= STATE_WBACK;
-    end
-    STATE_WBACK: begin
-      casex (curr_op)
-        OP_ADX: begin
-          // Set flags
-          sfr[OV] <= (~(regs[src_reg] ^ (alt2 ? regs[imm] : imm))
-                & ((alt2 ? regs[imm] : imm) ^ res17)
-                & 16'h8000) != 0;
-          sfr[S]  <= (res17 & 16'h8000) != 0;
-          sfr[CY] <= res17 >= 17'h10000;
-          sfr[Z]  <= (res17 & 16'hffff) == 0;
-
-          // Set result
-          regs[dst_reg] <= res17;
-          if (dst_reg != PC) begin
-            regs[PC] <= regs[PC] + 1;
-          end
-
-          // Register reset
-          sfr[B]    <= 1'b0;
-          sfr[ALT1] <= 1'b0;
-          sfr[ALT2] <= 1'b0;
-          src_reg  <= 4'h0;
-          dst_reg  <= 4'h0;
-        end
-        OP_IWT: begin
-          regs[immr4] <= {immr8[0], immr8[1]};
-          if (immr4 != PC) begin
-            regs[PC] <= regs[PC] + 1;
-          end
-
-          // Register reset
-          sfr[B]    <= 1'b0;
-          sfr[ALT1] <= 1'b0;
-          sfr[ALT2] <= 1'b0;
-          src_reg  <= 4'h0;
-          dst_reg  <= 4'h0;
-        end
-        default: regs[PC] <= regs[PC] + 1;
-      endcase
-      state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
-    end
   endcase
+
+  if (clk_count >= (clsr ? CLK_COUNT_MAX_FAST : CLK_COUNT_MAX_SLOW)) begin
+    clk_count <= 3'h0;
+  end
+  else begin
+    clk_count <= clk_count + 3'h1;
+  end
 end
 
 /* MMIO read process */
