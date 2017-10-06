@@ -110,7 +110,11 @@ reg clsr;        // Clock select register
 reg [7:0] pipeline;
 
 reg [3:0] src_reg;
+reg [15:0] src_reg_reg;
 reg [3:0] dst_reg;
+reg [15:0] dst_reg_reg;
+reg dst_reg_reg_assigned;
+initial dst_reg_reg_assigned = 1'b0;
 
 reg [16:0] res17;
 
@@ -173,6 +177,8 @@ parameter STATE_CPU4 = 8'b00010000;
 parameter OP_ALT1 = 8'b00111101;
 parameter OP_ALT2 = 8'b00111110;
 parameter OP_ALT3 = 8'b00111111;
+parameter OP_FROM = 8'b1011xxxx;
+parameter OP_TO   = 8'b0001xxxx;
 parameter OP_ADX  = 8'b0101xxxx;
 parameter OP_BEQ  = 8'b00001001;
 parameter OP_NOP  = 8'b00000001;
@@ -461,6 +467,8 @@ always @(posedge clkin) begin
     STATE_CPU1: begin
       state <= STATE_CPU2;
 
+      src_reg_reg <= regs[src_reg];
+
       if (cache_flag) begin
         // First, read first byte of instruction from cache
         curr_op <= cache_byte;
@@ -480,22 +488,23 @@ always @(posedge clkin) begin
             sfr[ALT2] <= 1'b1;
             regs[PC] <= regs[PC] + 16'h1;
           end
-          OP_ADX: begin
-            if (!alt1 && !alt2) begin
-              // ADD Rn
-              res17 <= regs[src_reg] + regs[imm];
+          OP_FROM: begin
+            if (~b) src_reg <= imm;
+            else begin
+              dst_reg_reg <= regs[imm];
+              dst_reg_reg_assigned <= 1'b1;
             end
-            else if (alt1 && !alt2) begin
-              // ADC Rn
-              res17 <= regs[src_reg] + regs[imm] + cy;
+
+            if (dst_reg != PC) begin
+              regs[PC] <= regs[PC] + 16'h1;
             end
-            else if (!alt1 && alt2) begin
-              // ADD #n
-              res17 <= regs[src_reg] + imm;
-            end
-            else /* if (alt1 && alt2) */ begin
-              // ADC #n
-              res17 <= regs[src_reg] + imm + cy;
+          end
+          OP_TO: begin
+            if (~b) dst_reg <= imm;
+            else regs[imm] <= src_reg_reg;
+
+            if (imm != PC) begin
+              regs[PC] <= regs[PC] + 16'h1;
             end
           end
           OP_IWT: begin
@@ -522,28 +531,22 @@ always @(posedge clkin) begin
       if (cache_flag) begin
         casex (curr_op)
           OP_ADX: begin
-            // Set flags
-            sfr[OV] <= (~(regs[src_reg] ^ (alt2 ? regs[imm] : imm))
-                  & ((alt2 ? regs[imm] : imm) ^ res17)
-                  & 16'h8000) != 0;
-            sfr[S]  <= (res17 & 16'h8000) != 0;
-            sfr[CY] <= res17 >= 17'h10000;
-            sfr[Z]  <= (res17 & 16'hffff) == 0;
-
-            // Write the result
-            regs[dst_reg] <= res17;
-
-            // Increment program counter if it was not set above
-            if (dst_reg != PC) begin
-              regs[PC] <= regs[PC] + 16'h1;
+            if (!alt1 && !alt2) begin
+              // ADD Rn
+              res17 <= src_reg_reg + regs[imm];
             end
-
-            // Register reset
-            sfr[B]    <= 1'b0;
-            sfr[ALT1] <= 1'b0;
-            sfr[ALT2] <= 1'b0;
-            src_reg  <= 4'h0;
-            dst_reg  <= 4'h0;
+            else if (alt1 && !alt2) begin
+              // ADC Rn
+              res17 <= src_reg_reg + regs[imm] + cy;
+            end
+            else if (!alt1 && alt2) begin
+              // ADD #n
+              res17 <= src_reg_reg + imm;
+            end
+            else /* if (alt1 && alt2) */ begin
+              // ADC #n
+              res17 <= src_reg_reg + imm + cy;
+            end
           end
           OP_BEQ:
           begin: op_beq_blk
@@ -572,23 +575,50 @@ always @(posedge clkin) begin
       // Wait until the third byte of the instruction is in the cache
       if (cache_flag) begin
         casex (curr_op)
+          OP_ADX: begin
+            // Set flags
+            sfr[OV] <= (~(src_reg_reg ^ (alt2 ? regs[imm] : imm))
+                  & ((alt2 ? regs[imm] : imm) ^ res17)
+                  & 16'h8000) != 0;
+            sfr[S]  <= (res17 & 16'h8000) != 0;
+            sfr[CY] <= res17 >= 17'h10000;
+            sfr[Z]  <= (res17 & 16'hffff) == 0;
+
+            // Write the result
+            dst_reg_reg <= res17;
+            dst_reg_reg_assigned <= 1'b1;
+
+            // Increment program counter if it was not set above
+            if (dst_reg != PC) begin
+              regs[PC] <= regs[PC] + 16'h1;
+            end
+          end
           OP_IWT: begin
             regs[immr4] <= {immr8[0], cache_byte};
             if (immr4 != PC) begin
               regs[PC] <= regs[PC] + 16'h1;
             end
-
-            // Register reset
-            sfr[B]    <= 1'b0;
-            sfr[ALT1] <= 1'b0;
-            sfr[ALT2] <= 1'b0;
-            src_reg  <= 4'h0;
-            dst_reg  <= 4'h0;
           end
         endcase
       end
     end
-    STATE_CPU4: state <= sfr[G] ? STATE_CPU1 : STATE_IDLE;
+    STATE_CPU4: begin
+      state <= sfr[G] ? STATE_CPU1 : STATE_IDLE;
+
+      casex (curr_op)
+        OP_ADX, OP_IWT: begin
+          // Register reset
+          sfr[B]    <= 1'b0;
+          sfr[ALT1] <= 1'b0;
+          sfr[ALT2] <= 1'b0;
+          src_reg  <= 4'h0;
+          dst_reg  <= 4'h0;
+        end
+      endcase
+
+      if (dst_reg_reg_assigned) regs[dst_reg] <= dst_reg_reg;
+      dst_reg_reg_assigned <= 1'b0;
+    end
   endcase
 end
 
