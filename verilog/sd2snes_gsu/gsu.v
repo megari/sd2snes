@@ -450,7 +450,7 @@ always @(posedge clkin) begin
 		//10'h038: MMIO_DOr <= scbr;
 
 		// Clock select register: write only
-		10'h039: MMIO_DOr <= {7'b0000000, clsr};
+		//10'h039: MMIO_DOr <= {7'b0000000, clsr};
 
 		// Screen mode register: write only
 		//10'h03a: MMIO_DOr <= {2'b00, scmr};
