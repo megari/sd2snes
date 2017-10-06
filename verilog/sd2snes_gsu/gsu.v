@@ -112,9 +112,18 @@ reg [7:0] pipeline;
 reg [3:0] src_reg;
 reg [15:0] src_reg_reg;
 reg [3:0] dst_reg;
-reg [15:0] dst_reg_reg;
-reg dst_reg_reg_assigned;
-initial dst_reg_reg_assigned = 1'b0;
+
+reg [3:0] dst1;
+reg [15:0] dst1_reg;
+reg dst1_reg_assigned;
+initial dst1_reg_assigned = 1'b0;
+
+/*
+reg [3:0] dst2;
+reg [15:0] dst2_reg;
+reg dst2_reg_assigned;
+initial dst2_reg_assigned = 1'b0;
+*/
 
 reg [16:0] res17;
 
@@ -154,6 +163,14 @@ assign cache_byte = cache_outa;
 /* Cache flag of byte in cache pointed to by the program counter */
 wire cache_flag = cache_flags[RESOLVED_CACHE_PC[8:4]];
 
+/* Bytes of the current instruction */
+reg [7:0] curr_inst [2:0];
+reg [2:0] curr_inst_valid;
+reg [2:0] curr_inst_fetches;
+
+/* Byte in pipeline */
+reg [7:0] pipeline_byte;
+
 /* Immediate parts of current instruction */
 wire [3:0] imm = cache_byte[3:0];
 reg [3:0] immr4;
@@ -192,6 +209,15 @@ initial begin: initial_blk
     regs[i] = 16'h0000;
   end
   curr_op = OP_NOP;
+
+  curr_inst[0] = OP_NOP;
+  curr_inst[1] = 8'b0;
+  curr_inst[2] = 8'b0;
+  for (i = 2'h0; i < 2'h3; i = i + 2'h1) begin
+    curr_inst_valid[i] = 1'b0;
+  end
+
+  pipeline_byte = OP_NOP;
 end
 
 reg [2:0] gsu_busy;
@@ -360,6 +386,70 @@ always @(posedge clkin) begin
   endcase
 end
 
+reg [3:0] PIPELINE_ST;
+parameter ST_PIPELINE_IDLE  = 4'b0001;
+parameter ST_PIPELINE_START = 4'b0010;
+parameter ST_PIPELINE_WAIT  = 4'b0100;
+parameter ST_PIPELINE_END   = 4'b1000;
+initial PIPELINE_ST = ST_PIPELINE_IDLE;
+
+reg [3:0] pipeline_delay;
+reg pipeline_cache_wait;
+initial pipeline_cache_wait = 0;
+
+/* Process to read instructions from either the cache or the gamepak ROM. */
+// XXX: take into account interaction with cache write operations
+always @(posedge clkin) begin
+  case (PIPELINE_ST)
+    ST_PIPELINE_IDLE: begin
+      PIPELINE_ST <= ST_PIPELINE_IDLE;
+      if (sfr[G]) begin
+        PIPELINE_ST <= ST_PIPELINE_START;
+      end
+    end
+    ST_PIPELINE_START: begin
+      PIPELINE_ST <= ST_PIPELINE_START;
+      CACHE_TRIG_ENr <= 1'b0;
+      if ((cbr[15:4] == regs[PC][15:4]) & cache_flags[RESOLVED_CACHE_PC[8:4]]) begin
+        PIPELINE_ST <= ST_PIPELINE_END;
+        pipeline_cache_wait <= 1'b0;
+        pipeline_byte <= cache_outa;
+        pipeline_delay <= 3; // XXX
+      end
+      else if (cbr[15:4] == regs[PC][15:4]) begin
+        // Pull the block into cache. Then the branch above takes over.
+        if (~pipeline_cache_wait) begin
+          CACHE_TRIG_ENr <= 1'b1;
+          pipeline_cache_wait <= 1'b1;
+        end
+      end
+      else begin
+        // Read the block from gamepak ROM
+        PIPELINE_ST <= ST_PIPELINE_WAIT;
+        cpu_rom_bus_rq <= 1'b1;
+        cpu_rombusaddr <= {pbr, regs[PC]};
+      end
+    end
+    ST_PIPELINE_WAIT: begin
+        PIPELINE_ST <= ST_PIPELINE_WAIT;
+        cpu_rom_bus_rq <= 1'b0;
+        if (~cpu_rom_bus_rq & ROM_BUS_RDY) begin // XXX: what if cache and this are reading at the same time?
+          PIPELINE_ST <= ST_PIPELINE_END;
+          pipeline_byte <= ROM_BUS_DI;
+          pipeline_delay <= 3; // XXX
+        end
+    end
+    ST_PIPELINE_END: begin
+      PIPELINE_ST <= ST_PIPELINE_END;
+      pipeline_delay <= pipeline_delay - 1;
+      if (pipeline_delay == 0)
+        PIPELINE_ST <= sfr[G] ? ST_PIPELINE_START : ST_PIPELINE_IDLE;
+    end
+  endcase
+end
+
+// XXX: somehow move pipeline byte to current instruction when necessary
+
 always @(posedge clkin) begin
   case (state)
     STATE_IDLE: begin
@@ -469,9 +559,9 @@ always @(posedge clkin) begin
 
       src_reg_reg <= regs[src_reg];
 
-      if (cache_flag) begin
+      if (curr_inst_valid[0]) begin
         // First, read first byte of instruction from cache
-        curr_op <= cache_byte;
+        curr_op <= curr_inst[0];
         casex (cache_byte)
           OP_ALT1: begin
             sfr[ALT1] <= 1'b1;
@@ -491,20 +581,29 @@ always @(posedge clkin) begin
           OP_FROM: begin
             if (~b) src_reg <= imm;
             else begin
-              dst_reg_reg <= regs[imm];
-              dst_reg_reg_assigned <= 1'b1;
-            end
+              dst1 <= dst_reg;
+              dst1_reg <= regs[imm];
+              dst1_reg_assigned <= 1'b1;
 
-            if (dst_reg != PC) begin
-              regs[PC] <= regs[PC] + 16'h1;
+              if (dst_reg != PC) begin
+                regs[PC] <= regs[PC] + 16'h1;
+              end
+
+              // XXX: need to reset regs
             end
           end
           OP_TO: begin
             if (~b) dst_reg <= imm;
-            else regs[imm] <= src_reg_reg;
+            else begin
+              dst1 <= imm;
+              dst1_reg <= regs[src_reg];
+              dst1_reg_assigned <= 1'b1;
 
-            if (imm != PC) begin
-              regs[PC] <= regs[PC] + 16'h1;
+              if (imm != PC) begin
+                regs[PC] <= regs[PC] + 16'h1;
+              end
+
+              // XXX: need to reset regs
             end
           end
           OP_IWT: begin
@@ -585,8 +684,9 @@ always @(posedge clkin) begin
             sfr[Z]  <= (res17 & 16'hffff) == 0;
 
             // Write the result
-            dst_reg_reg <= res17;
-            dst_reg_reg_assigned <= 1'b1;
+            dst1 <= dst_reg;
+            dst1_reg <= res17;
+            dst1_reg_assigned <= 1'b1;
 
             // Increment program counter if it was not set above
             if (dst_reg != PC) begin
@@ -616,8 +716,11 @@ always @(posedge clkin) begin
         end
       endcase
 
-      if (dst_reg_reg_assigned) regs[dst_reg] <= dst_reg_reg;
-      dst_reg_reg_assigned <= 1'b0;
+      // Move results to destination GPRs.
+      if (dst1_reg_assigned) begin
+        regs[dst1] <= dst1_reg;
+        dst1_reg_assigned <= 1'b0;
+      end
     end
   endcase
 end
