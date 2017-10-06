@@ -283,19 +283,6 @@ gsu snes_gsu (
   .ADDR(SNES_ADDR),
   .CS(gsu_enable),
   .reg_we_rising(SNES_WR_end)
-/* ,
-  .ram_data(RAM_DATA),
-  .ram_addr(RAM_ADDR),
-  .ram_ce(RAM_CE),
-  .ram_we(RAM_WE),
-  .rom_data(ROM_DATA),
-  .rom_addr(ROM_ADDR),
-  .rom_ce(ROM_CE),
-  .rom_oe(ROM_OE),
-  .rom_we(ROM_WE),
-  .rom_bhe(ROM_BHE),
-  .rom_ble(ROM_BLE)
-*/
 );
 
 spi snes_spi(
