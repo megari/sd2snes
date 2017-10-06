@@ -79,78 +79,38 @@ always @(MMIO_WR_EN, pc_mmio, pc_int) begin
 end
 
 // Status/flag register flags
-reg z;    // Zero
-reg z_int;
-reg z_mmio;
-always @(MMIO_WR_EN, z_mmio, z_int) begin
-	z <= MMIO_WR_EN ? z_mmio : z_int;
+reg [15:0] sfr;
+reg [15:0] sfr_int;
+reg [15:0] sfr_mmio;
+always @(MMIO_WR_EN, sfr_mmio, sfr_int) begin
+	sfr <= MMIO_WR_EN ? sfr_mmio : sfr_int;
 end
-reg cy;   // Carry
-reg cy_int;
-reg cy_mmio;
-always @(MMIO_WR_EN, cy_mmio, cy_int) begin
-	cy <= MMIO_WR_EN ? cy_mmio : cy_int;
-end
-reg s;    // Sign
-reg s_int;
-reg s_mmio;
-always @(MMIO_WR_EN, s_mmio, s_int) begin
-	s <= MMIO_WR_EN ? s_mmio : s_int;
-end
-reg ov;   // Overflow
-reg ov_int;
-reg ov_mmio;
-always @(MMIO_WR_EN, ov_mmio, ov_int) begin
-	ov <= MMIO_WR_EN ? ov_mmio : ov_int;
-end
-reg g;    // Go
-reg g_int;
-reg g_mmio;
-always @(MMIO_WR_EN, g_mmio, g_int) begin
-	g <= MMIO_WR_EN ? g_mmio : g_int;
-end
-reg r;    // Reading ROM using R14
-reg r_int;
-reg r_mmio;
-always @(MMIO_WR_EN, r_mmio, r_int) begin
-	r <= MMIO_WR_EN ? r_mmio : r_int;
-end
-reg alt1; // Mode flag for next insn
-reg alt1_int;
-reg alt1_mmio;
-always @(MMIO_WR_EN, alt1_mmio, alt1_int) begin
-	alt1 <= MMIO_WR_EN ? alt1_mmio : alt1_int;
-end
-reg alt2; // Mode flag for next insn
-reg alt2_int;
-reg alt2_mmio;
-always @(MMIO_WR_EN, alt2_mmio, alt2_int) begin
-	alt2 <= MMIO_WR_EN ? alt2_mmio : alt2_int;
-end
-reg il;   // Immediate lower
-reg il_int;
-reg il_mmio;
-always @(MMIO_WR_EN, il_mmio, il_int) begin
-	il <= MMIO_WR_EN ? il_mmio : il_int;
-end
-reg ih;   // Immediate higher
-reg ih_int;
-reg ih_mmio;
-always @(MMIO_WR_EN, ih_mmio, ih_int) begin
-	ih <= MMIO_WR_EN ? ih_mmio : ih_int;
-end
-reg b;    // Instruction executed with WITH
-reg b_int;
-reg b_mmio;
-always @(MMIO_WR_EN, b_mmio, b_int) begin
-	b <= MMIO_WR_EN ? b_mmio : b_int;
-end
-reg irq;  // Interrupt
-reg irq_int;
-reg irq_mmio;
-always @(MMIO_WR_EN, irq_mmio, irq_int) begin
-	irq <= MMIO_WR_EN ? irq_mmio : irq_int;
-end
+wire z = sfr[1];    // Zero
+wire cy = sfr[2];   // Carry
+wire s = sfr[3];    // Sign
+wire ov = sfr[4];   // Overflow
+wire g = sfr[5];    // Go
+wire r = sfr[6];    // Reading ROM using R14
+wire alt1 = sfr[8]; // Mode flag for next insn
+wire alt2 = sfr[9]; // Mode flag for next insn
+wire il = sfr[10];  // Immediate lower
+wire ih = sfr[11];  // Immediate higher
+wire b = sfr[12];   // Instruction executed with WITH
+wire irq = sfr[15]; // Interrupt
+parameter
+	Z    =  1,
+	CY   =  2,
+	S    =  3,
+	OV   =  4,
+	G    =  5,
+	R    =  6,
+	ALT1 =  8,
+	ALT2 =  9,
+	IL   = 10,
+	IH   = 11,
+	B    = 12,
+	IRQ  = 15
+;
 
 reg [7:0] pbr;   // Program bank register
 reg [7:0] pbr_int;
@@ -323,9 +283,9 @@ always @(posedge clk) begin // Should probably use clock in divided by 4 or 8
 			OP_NOP:
 			begin
 				// Just reset regs.
-				b_int <= 1'b0;
-				alt1_int <= 1'b0;
-				alt2_int <= 1'b0;
+				sfr_int[B] <= 1'b0;
+				sfr_int[ALT1] <= 1'b0;
+				sfr_int[ALT2] <= 1'b0;
 				src_reg <= 3'h0;
 				dst_reg <= 3'h0;
 			end
@@ -353,20 +313,20 @@ always @(posedge clk) begin // Should probably use clock in divided by 4 or 8
 				end
 
 				// Set flags
-				ov_int <= (~(regs[src_reg] ^ regs[imm])
+				sfr_int[OV] <= (~(regs[src_reg] ^ regs[imm])
 							& (regs[imm] ^ tmp)
 							& 16'h8000) != 0;
-				s_int  <= (tmp & 16'h8000) != 0;
-				cy_int <= tmp >= 17'h10000;
-				z_int  <= (tmp & 16'hffff) == 0;
+				sfr_int[S]  <= (tmp & 16'h8000) != 0;
+				sfr_int[CY] <= tmp >= 17'h10000;
+				sfr_int[Z]  <= (tmp & 16'hffff) == 0;
 
 				// Set result
 				regs_int[dst_reg] = tmp;
 
 				// Register reset
-				b_int    <= 1'b0;
-				alt1_int <= 1'b0;
-				alt2_int <= 1'b0;
+				sfr_int[B]    <= 1'b0;
+				sfr_int[ALT1] <= 1'b0;
+				sfr_int[ALT2] <= 1'b0;
 				src_reg  <= 3'h0;
 				dst_reg  <= 3'h0;
 			end
@@ -429,8 +389,8 @@ always @(posedge clkin) begin
 		10'h01f: MMIO_DOr <= pc[15:8];
 
 		// Status flag register
-		10'h030: MMIO_DOr <= {1'b0, r, g, ov, s, cy, z, 1'b0};
-		10'h031: MMIO_DOr <= {irq, 1'b0, 1'b0, b, ih, il, alt2, alt1};
+		10'h030: MMIO_DOr <= sfr[7:0];
+		10'h031: MMIO_DOr <= sfr[15:8];
 
 		//10'h032: Unused
 
@@ -514,22 +474,8 @@ always @(posedge clkin) begin
 			10'h01f: pc_mmio[15:8] <= DI;
 
 			// Status flag register
-			10'h030: begin
-				r_mmio <= DI[6];
-				g_mmio <= DI[5];
-				ov_mmio <= DI[4];
-				s_mmio <= DI[3];
-				cy_mmio <= DI[2];
-				z_mmio <= DI[1];
-			end
-			10'h031: begin
-				irq_mmio <= DI[7];
-				b_mmio <= DI[4];
-				ih_mmio <= DI[3];
-				il_mmio <= DI[2];
-				alt2_mmio <= DI[1];
-				alt1_mmio <= DI[0];
-			end
+			10'h030: sfr_mmio[7:0] <= {1'b0, DI[6:1], 1'b0};
+			10'h031: sfr_mmio[15:8] <= {DI[7], 2'b00, DI[4:0]};
 
 			//10'h032: Unused
 
