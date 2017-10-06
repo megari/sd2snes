@@ -26,7 +26,9 @@ module address(
   input SNES_ROMSEL,        // ROMSEL from SNES
   output [23:0] ROM_ADDR,   // Address to request from SRAM0
   output ROM_HIT,           // enable SRAM0
+  output RAM_HIT,           // enable SRAM1
   output IS_SAVERAM,        // address/CS mapped as SRAM?
+  output IS_GAMEPAKRAM,     // address mapped as gamepak RAM?
   output IS_ROM,            // address mapped as ROM?
   output IS_WRITABLE,       // address somehow mapped as writable area?
   input [23:0] SAVERAM_MASK,
@@ -81,10 +83,10 @@ assign IS_SAVERAM = SAVERAM_MASK[0] & (!SNES_ADDR[23] & &SNES_ADDR[22:20] & SNES
        Bank 0x60-0x7f, Offset 0000-ffff
            This effectively duplicates the mapping in 0x60-0x61, 0x62-0x63, etc.
 */
-wire IS_GAMEPAKRAM = ((~|SNES_ADDR[22:20] & (SNES_ADDR[15:13] == 3'b011))
-                      |(&SNES_ADDR[22:20] & ~|SNES_ADDR[19:17]));
+assign IS_GAMEPAKRAM = ((~|SNES_ADDR[22:20] & (SNES_ADDR[15:13] == 3'b011))
+                        |(&SNES_ADDR[22:20] & ~|SNES_ADDR[19:17]));
 
-assign IS_WRITABLE = IS_SAVERAM;
+assign IS_WRITABLE = IS_SAVERAM | IS_GAMEPAKRAM;
 
 /* The Save RAM, ROM and gamepak RAM are laid out in the physical RAM as follows:
    Save RAM addresses:
@@ -122,7 +124,9 @@ assign SRAM_SNES_ADDR = IS_SAVERAM
 
 assign ROM_ADDR = SRAM_SNES_ADDR;
 
-assign ROM_HIT = IS_ROM | IS_WRITABLE;
+assign ROM_HIT = IS_ROM | (!IS_GAMEPAKRAM & IS_WRITABLE);
+
+assign RAM_HIT = IS_GAMEPAKRAM;
 
 assign msu_enable = featurebits[FEAT_MSU1] & (!SNES_ADDR[22] && ((SNES_ADDR[15:0] & 16'hfff8) == 16'h2000));
 

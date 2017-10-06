@@ -405,7 +405,9 @@ address snes_addr(
   .SNES_ROMSEL(SNES_ROMSEL),
   .ROM_ADDR(MAPPED_SNES_ADDR),   // Address to request from SRAM (active low)
   .ROM_HIT(ROM_HIT),     // want to access RAM0
+  .RAM_HIT(RAM_HIT),
   .IS_SAVERAM(IS_SAVERAM),
+  .IS_GAMEPAKRAM(IS_GAMEPAKRAM),
   .IS_ROM(IS_ROM),
   .IS_WRITABLE(IS_WRITABLE),
   .SAVERAM_MASK(SAVERAM_MASK),
@@ -658,6 +660,8 @@ assign ROM_CE = 1'b0;
 
 assign ROM_BHE = ROM_ADDR0;
 assign ROM_BLE = !ROM_ADDR0;
+
+assign RAM_DATA = (RAM_HIT & ~SNES_WRITE) ? SNES_DATA : 8'bZ;
 
 assign SNES_DATABUS_OE = msu_enable ? 1'b0 :
                          gsu_enable ? 1'b0 :
