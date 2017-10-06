@@ -280,7 +280,7 @@ gsu snes_gsu (
   .clkin(CLK2),
   .DI(GSU_SNES_DATA_IN),
   .DO(GSU_SNES_DATA_OUT),
-  .ADDR(SNES_ADDR[11:0]),
+  .ADDR(SNES_ADDR),
   .CS(gsu_enable),
   .reg_we_rising(SNES_WR_end)
 /* ,

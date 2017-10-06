@@ -22,27 +22,10 @@ module gsu(
 	input clkin,
 	input [7:0] DI,
 	output [7:0] DO,
-	input [11:0] ADDR, // 12'h000 - 12'h2ff
+	input [23:0] ADDR,
 	input CS,
 	input reg_we_rising
-
-/* ,
-	// Gamepak RAM
-	inout [7:0] ram_data,
-	output [18:0] ram_addr,
-	output ram_ce,
-	output ram_we,
-
-	// Gamepak ROM
-	input [15:0] rom_data,
-	output [22:0] rom_addr,
-	output rom_ce,
-	output rom_oe,
-	output rom_we,
-	output rom_bhe,
-	output rom_ble
-*/
-    );
+);
 
 reg [2:0] clk_counter;
 reg clk;
@@ -271,7 +254,7 @@ always @(posedge clk) begin // Should probably use clock in divided by 4 or 8
 `endif
 end
 
-wire mmio_enable = CS & 1'b1; // TODO replace with something sensible
+wire mmio_enable = CS & !ADDR[22] & (ADDR[15:12] == 4'b0011) & (ADDR[15:0] < 16'h3300);
 wire MMIO_WR_EN = mmio_enable & reg_we_rising;
 
 reg  [7:0] MMIO_DOr;
@@ -282,7 +265,7 @@ assign DO = mmio_enable ? MMIO_DO
             : 8'h00;
 
 always @(posedge clkin) begin
-	case (ADDR[9:0])
+	casex (ADDR[9:0])
 		10'h000: MMIO_DOr <= regs[0][7:0];
 		10'h001: MMIO_DOr <= regs[0][15:8];
 		10'h002: MMIO_DOr <= regs[1][7:0];
@@ -320,39 +303,46 @@ always @(posedge clkin) begin
 		10'h030: MMIO_DOr <= {irq, 1'b0, 1'b0, b, ih, il, alt2, alt1};
 		10'h031: MMIO_DOr <= {1'b0, r, g, ov, s, cy, z, 1'b0};
 
+		//10'h032: Unused
+
+		// Back-up RAM register: write only
+		//10'h033: MMIO_DOr <= {7'b0000000, bramr};
+
 		// Program bank register
 		10'h034: MMIO_DOr <= pbr;
 
 		// Game Pak ROM bank register
 		10'h036: MMIO_DOr <= rombr;
 
+		// Config register: write only
+		//10'h037: MMIO_DOr <= cfgr;
+
+		// Screen base register: write only
+		//10'h038: MMIO_DOr <= scbr;
+
+		// Clock select register: write only
+		10'h039: MMIO_DOr <= {7'b0000000, clsr};
+
+		// Screen mode register: write only
+		//10'h03a: MMIO_DOr <= {2'b00, scmr};
+
+		// Version code register
+		10'h03b: MMIO_DOr <= vcr;
+
 		// Game Pak RAM bank register
 		10'h03c: MMIO_DOr <= {7'b0000000, rambr};
+
+		//10'h03d: Unused
 
 		// Cache base register
 		10'h03e: MMIO_DOr <= cbr[7:0];
 		10'h03f: MMIO_DOr <= cbr[15:8];
 
-		// Screen base register: write only
-		//10'h038: MMIO_DOr <= scbr;
-
-		// Screen mode register: write only
-		//10'h03a: MMIO_DOr <= {2'b00, scmr};
-
 		// Color register: no access from SNES CPU
 		// Plot option register: no access from SNES CPU
 
-		// Back-up RAM register: write only
-		//10'h033: MMIO_DOr <= {7'b0000000, bramr};
-
-		// Version code register
-		10'h03b: MMIO_DOr <= vcr;
-
-		// Config register: write only
-		//10'h037: MMIO_DOr <= cfgr;
-
-		// Clock select register: write only
-		10'h039: MMIO_DOr <= {7'b0000000, clsr};
+		// Cache RAM
+		//10'h1xx, 10'h2xx:
 
 		default: MMIO_DOr <= 8'hff;
 	endcase
