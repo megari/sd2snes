@@ -174,7 +174,7 @@ always @(posedge clkin) begin
       //      also be written to by internal processes
       10'h1xx, 10'h2xx: begin
         cache[RESOLVED_CACHE_ADDR] = DI;
-        if (ADDR[0]) begin
+        if (&ADDR[3:0]) begin
           cache_flags[RESOLVED_CACHE_ADDR[8:4]] = 1'b1;
         end
       end
