@@ -304,8 +304,8 @@ always @(posedge clkin) begin
 		10'h01f: MMIO_DOr <= pc[15:8];
 
 		// Status flag register
-		10'h030: MMIO_DOr <= {irq, 1'b0, 1'b0, b, ih, il, alt2, alt1};
-		10'h031: MMIO_DOr <= {1'b0, r, g, ov, s, cy, z, 1'b0};
+		10'h030: MMIO_DOr <= {1'b0, r, g, ov, s, cy, z, 1'b0};
+		10'h031: MMIO_DOr <= {irq, 1'b0, 1'b0, b, ih, il, alt2, alt1};
 
 		//10'h032: Unused
 
