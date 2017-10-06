@@ -31,7 +31,7 @@ module gsu(
   input ROM_BUS_RDY,
   input [7:0] RAM_BUS_DI,
   input [7:0] RAM_BUS_DO,
-  output [23:0] RAM_BUS_ADDR,
+  output [18:0] RAM_BUS_ADDR,
   output RAM_BUS_RRQ,
   output RAM_BUS_WRQ,
   input RAM_BUS_RDY,

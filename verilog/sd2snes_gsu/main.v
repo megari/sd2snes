@@ -52,7 +52,7 @@ module main(
   /* Bus 2: SRAM, 4Mbit, 8bit, 45ns */
   inout [7:0] RAM_DATA,
   output [18:0] RAM_ADDR,
-  output RAM_CE,
+  //output RAM_CE,
   output RAM_OE,
   output RAM_WE,
 
@@ -200,11 +200,19 @@ parameter ST_MCU_WR_END      = 7'b0010000;
 parameter ST_GSU_ROM_RD_ADDR = 7'b0100000;
 parameter ST_GSU_ROM_RD_END  = 7'b1000000;
 
+parameter ST_RAM_IDLE        = 7'b0000001;
+parameter ST_RAM_GSU_RD_ADDR = 7'b0000010;
+parameter ST_RAM_GSU_RD_END  = 7'b0000100;
+parameter ST_RAM_GSU_WR_ADDR = 7'b0001000;
+parameter ST_RAM_GSU_WR_END  = 7'b0010000;
+
 parameter SNES_DEAD_TIMEOUT = 17'd86400; // 1ms
 
 parameter ROM_CYCLE_LEN = 4'd7;
+parameter RAM_CYCLE_LEN = 4'd4;
 
 reg [6:0] STATE;
+reg [6:0] RAM_STATE;
 initial STATE = ST_IDLE;
 
 assign MSU_SNES_DATA_IN = BUS_DATA;
@@ -280,6 +288,9 @@ msu snes_msu (
 
 reg [7:0] GSU_ROM_DINr;
 wire [23:0] GSU_ROM_ADDR;
+reg [7:0] GSU_RAM_DINr;
+reg [7:0] GSU_RAM_DOr;
+wire [18:0] GSU_RAM_ADDR;
 //wire [2:0] gsu_busy;
 
 gsu snes_gsu (
@@ -293,9 +304,15 @@ gsu snes_gsu (
   .ROM_BUS_ADDR(GSU_ROM_ADDR),
   .ROM_BUS_RRQ(GSU_ROM_RRQ),
   .ROM_BUS_RDY(GSU_ROM_RDY),
+  .RAM_BUS_DI(GSU_RAM_DINr),
+  .RAM_BUS_DO(GSU_RAM_DOr),
+  .RAM_BUS_ADDR(GSU_RAM_ADDR),
+  .RAM_BUS_RRQ(GSU_RAM_RRQ),
+  .RAM_BUS_WRQ(GSU_RAM_WRQ),
+  .RAM_BUS_RDY(GSU_RAM_RDY),
   .gsu_active(gsu_active),
-  .ron(gsu_ron),
-  .ran(gsu_ran)
+  .ron(gsu_rom_exclusive),
+  .ran(gsu_ram_exclusive)
 );
 
 spi snes_spi(
@@ -403,9 +420,9 @@ address snes_addr(
   .SNES_ADDR(SNES_ADDR), // requested address from SNES
   .SNES_PA(SNES_PA),
   .SNES_ROMSEL(SNES_ROMSEL),
-  .ROM_ADDR(MAPPED_SNES_ADDR),   // Address to request from SRAM (active low)
-  .ROM_HIT(ROM_HIT),     // want to access RAM0
-  .RAM_HIT(RAM_HIT),
+  .MAPPED_ADDR(MAPPED_SNES_ADDR),   // Address to request from SRAM (active low)
+  .SRAM0_HIT(ROM_HIT),     // want to access RAM0
+  .SRAM1_HIT(RAM_HIT),     // want to access RAM1
   .IS_SAVERAM(IS_SAVERAM),
   .IS_GAMEPAKRAM(IS_GAMEPAKRAM),
   .IS_ROM(IS_ROM),
@@ -494,15 +511,22 @@ assign SNES_DATA = (r213f_enable & ~SNES_PARD & ~r213f_forceread) ? r213fr
                                   :gsu_enable ? GSU_SNES_DATA_OUT
                                   :(cheat_hit & ~feat_cmd_unlock) ? cheat_data_out
                                   :((snescmd_unlock | feat_cmd_unlock) & snescmd_enable) ? snescmd_dout
-                                  :(ROM_ADDR0 ? ROM_DATA[7:0] : ROM_DATA[15:8])
+                                  :(RAM_HIT & ~gsu_ram_exclusive) ? RAM_DATA
+                                  :(ROM_HIT & ~gsu_rom_exclusive) ? (ROM_ADDR0 ? ROM_DATA[7:0] : ROM_DATA[15:8])
+                                  : 8'bZ // XXX: will this cause problems? Should we have some kind of a driven value here?
                                   ) : 8'bZ;
 
 reg [3:0] ST_MEM_DELAYr;
+reg [3:0] ST_RAM_DELAYr;
 reg MCU_RD_PENDr = 0;
 reg MCU_WR_PENDr = 0;
 reg GSU_ROM_RD_PENDr = 0;
+reg GSU_RAM_RD_PENDr = 0;
+reg GSU_RAM_WR_PENDr = 0;
 reg [23:0] ROM_ADDRr;
 reg [23:0] GSU_ROM_ADDRr;
+reg [23:0] RAM_ADDRr;
+reg [23:0] GSU_RAM_ADDRr;
 
 reg RQ_MCU_RDYr;
 initial RQ_MCU_RDYr = 1'b1;
@@ -512,14 +536,23 @@ reg RQ_GSU_ROM_RDYr;
 initial RQ_GSU_ROM_RDYr = 1'b1;
 assign GSU_ROM_RDY = RQ_GSU_ROM_RDYr;
 
+reg RQ_GSU_RAM_RDYr;
+initial RQ_GSU_RAM_RDYr = 1'b1;
+assign GSU_RAM_RDY = RQ_GSU_RAM_RDYr;
+
 wire MCU_WR_HIT = |(STATE & ST_MCU_WR_ADDR);
 wire MCU_RD_HIT = |(STATE & ST_MCU_RD_ADDR);
 wire MCU_HIT = MCU_WR_HIT | MCU_RD_HIT;
 
 wire GSU_ROM_HIT = |(STATE & ST_GSU_ROM_RD_ADDR);
+wire GSU_RAM_WR_HIT = |(RAM_STATE & ST_RAM_GSU_WR_ADDR);
+wire GSU_RAM_RD_HIT = |(RAM_STATE & ST_RAM_GSU_RD_ADDR);
+wire GSU_RAM_HIT = GSU_RAM_WR_HIT | GSU_RAM_RD_HIT;
 
 assign ROM_ADDR  = (SD_DMA_TO_ROM) ? MCU_ADDR[23:1] : MCU_HIT ? ROM_ADDRr[23:1] : GSU_ROM_HIT ? GSU_ROM_ADDRr[23:1] : MAPPED_SNES_ADDR[23:1];
 assign ROM_ADDR0 = (SD_DMA_TO_ROM) ? MCU_ADDR[0] : MCU_HIT ? ROM_ADDRr[0] : GSU_ROM_HIT ? GSU_ROM_ADDRr[0] : MAPPED_SNES_ADDR[0];
+
+assign RAM_ADDR  = GSU_RAM_HIT ? GSU_RAM_ADDRr : MAPPED_SNES_ADDR;
 
 reg[17:0] SNES_DEAD_CNTr;
 initial SNES_DEAD_CNTr = 0;
@@ -533,6 +566,24 @@ always @(posedge CLK2) begin
     end else if(STATE == ST_GSU_ROM_RD_END) begin
       GSU_ROM_RD_PENDr <= 1'b0;
       RQ_GSU_ROM_RDYr <= 1'b1;
+    end
+  end
+end
+
+always @(posedge CLK2) begin
+  if(gsu_active) begin
+    if(GSU_RAM_RRQ) begin
+      GSU_RAM_RD_PENDr <= 1'b1;
+      RQ_GSU_RAM_RDYr <= 1'b0;
+      GSU_RAM_ADDRr <= GSU_RAM_ADDR;
+    end else if (GSU_RAM_WRQ) begin
+      GSU_RAM_WR_PENDr <= 1'b1;
+      RQ_GSU_RAM_RDYr <= 1'b0;
+      GSU_RAM_ADDRr <= GSU_RAM_ADDR;
+    end else if (RAM_STATE & (ST_RAM_GSU_RD_END | ST_RAM_GSU_WR_END)) begin
+      GSU_RAM_RD_PENDr <= 1'b0;
+      GSU_RAM_WR_PENDr <= 1'b0;
+      RQ_GSU_RAM_RDYr <= 1'b1;
     end
   end
 end
@@ -616,6 +667,39 @@ always @(posedge CLK2) begin
 end
 
 always @(posedge CLK2) begin
+  case (RAM_STATE)
+    ST_RAM_IDLE: begin
+      RAM_STATE <= ST_RAM_IDLE;
+      if (gsu_active) begin
+        if (GSU_RAM_RD_PENDr) begin
+          RAM_STATE <= ST_RAM_GSU_RD_ADDR;
+          ST_RAM_DELAYr <= RAM_CYCLE_LEN;
+        end
+        else if (GSU_RAM_WR_PENDr) begin
+          RAM_STATE <= ST_RAM_GSU_WR_ADDR;
+          ST_RAM_DELAYr <= RAM_CYCLE_LEN;
+        end
+      end
+    end
+    ST_RAM_GSU_RD_ADDR: begin
+      RAM_STATE <= ST_RAM_GSU_RD_ADDR;
+      ST_RAM_DELAYr <= ST_RAM_DELAYr - 1;
+      if(ST_RAM_DELAYr == 0) RAM_STATE <= ST_RAM_GSU_RD_END;
+      GSU_RAM_DINr <= RAM_DATA; // XXX: make sure RAM_DATA is 8 bits wide
+    end
+    ST_RAM_GSU_WR_ADDR: begin
+      RAM_STATE <= ST_RAM_GSU_WR_ADDR;
+      ST_RAM_DELAYr <= ST_RAM_DELAYr - 1;
+      if(ST_RAM_DELAYr == 0) RAM_STATE <= ST_RAM_GSU_WR_END;
+    end
+    ST_RAM_GSU_RD_END, ST_RAM_GSU_WR_END: begin
+      RAM_STATE <= ST_RAM_IDLE;
+    end
+  endcase
+end
+
+
+always @(posedge CLK2) begin
   if(SNES_cycle_end) r213f_forceread <= 1'b1;
   else if(SNES_PARD_start & r213f_enable) begin
 //    r213f_delay <= 3'b000;
@@ -661,7 +745,16 @@ assign ROM_CE = 1'b0;
 assign ROM_BHE = ROM_ADDR0;
 assign ROM_BLE = !ROM_ADDR0;
 
-assign RAM_DATA = (RAM_HIT & ~SNES_WRITE) ? SNES_DATA : 8'bZ;
+assign RAM_DATA = (RAM_HIT & ~SNES_WRITE) ? SNES_DATA
+                  : (GSU_RAM_WR_HIT ? GSU_SNES_DATA_OUT : 8'bZ);
+
+// XXX: the GSU should actually be in a waiting state when ran = 0 and RAM access is needed.
+assign RAM_WE = (~gsu_ram_exclusive & RAM_HIT & SNES_CPU_CLK) ? SNES_WRITE
+                : (gsu_ram_exclusive & GSU_RAM_WR_HIT) ? 1'b0
+                : 1'b1;
+
+assign RAM_OE = 1'b0;
+//assign RAM_CE = 1'b0;
 
 assign SNES_DATABUS_OE = msu_enable ? 1'b0 :
                          gsu_enable ? 1'b0 :
@@ -677,7 +770,7 @@ assign SNES_DATABUS_DIR = (~SNES_READ | (~SNES_PARD & (r213f_enable)))
                            ? 1'b1 ^ (r213f_forceread & r213f_enable & ~SNES_PARD)
                            : 1'b0;
 
-assign SNES_IRQ = 1'b0;
+assign SNES_IRQ = 1'b0; // TODO: the GSU can send an IRQ
 
 assign p113_out = 1'b0;
 

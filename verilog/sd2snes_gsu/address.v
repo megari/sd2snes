@@ -24,9 +24,9 @@ module address(
   input [23:0] SNES_ADDR,   // requested address from SNES
   input [7:0] SNES_PA,      // peripheral address from SNES
   input SNES_ROMSEL,        // ROMSEL from SNES
-  output [23:0] ROM_ADDR,   // Address to request from SRAM0
-  output ROM_HIT,           // enable SRAM0
-  output RAM_HIT,           // enable SRAM1
+  output [23:0] MAPPED_ADDR,// Address to request from SRAM0
+  output SRAM0_HIT,         // enable SRAM0
+  output SRAM1_HIT,         // enable SRAM1
   output IS_SAVERAM,        // address/CS mapped as SRAM?
   output IS_GAMEPAKRAM,     // address mapped as gamepak RAM?
   output IS_ROM,            // address mapped as ROM?
@@ -122,11 +122,11 @@ assign SRAM_SNES_ADDR = IS_SAVERAM
                                    ({7'b1100000, SNES_ADDR[16:0]})
                               : SNES_ADDR));
 
-assign ROM_ADDR = SRAM_SNES_ADDR;
+assign MAPPED_ADDR = SRAM_SNES_ADDR;
 
-assign ROM_HIT = IS_ROM | (!IS_GAMEPAKRAM & IS_WRITABLE);
+assign SRAM0_HIT = IS_ROM | (!IS_GAMEPAKRAM & IS_WRITABLE);
 
-assign RAM_HIT = IS_GAMEPAKRAM;
+assign SRAM1_HIT = IS_GAMEPAKRAM;
 
 assign msu_enable = featurebits[FEAT_MSU1] & (!SNES_ADDR[22] && ((SNES_ADDR[15:0] & 16'hfff8) == 16'h2000));
 
