@@ -112,6 +112,8 @@ reg [7:0] pipeline;
 reg [3:0] src_reg;
 reg [3:0] dst_reg;
 
+reg [16:0] res17;
+
 /* ROM/RAM bus access flags */
 assign ron = scmr[4];
 assign ran = scmr[3];
@@ -355,21 +357,55 @@ end
 always @(posedge clkin) begin
   case (state)
     STATE_IDLE: begin
+      state <= STATE_IDLE;
+
       if (MMIO_WR_EN) begin
         casex (ADDR[9:0])
-          /* GPRs R0~R15 */
-          10'b00000xxxxx: begin
-            regs[ADDR[4:1]] <= ADDR[0]
-                               ? {DI, regs[ADDR[4:1]][7:0]}
-                               : {regs[ADDR[4:1]][15:8], DI};
-
-            if (ADDR[4:1] == RAP) begin
-              // TODO: should update ROM buffer
-            end
-            else if (ADDR[4:0] == {PC, 1'b1}) begin
-              sfr[G] <= 1'b1;
-              state <= STATE_CPU1;
-            end
+          /* GPRs R0~R15
+             For some reason, unless these are written this way,
+             the code either fails to synthesize or fails timing
+             constraints on clkin */
+          10'h000: regs[0] <= {regs[0][15:8], DI};
+          10'h001: regs[0] <= {DI, regs[0][7:0]};
+          10'h002: regs[1] <= {regs[1][15:8], DI};
+          10'h003: regs[1] <= {DI, regs[1][7:0]};
+          10'h004: regs[2] <= {regs[2][15:8], DI};
+          10'h005: regs[2] <= {DI, regs[2][7:0]};
+          10'h006: regs[3] <= {regs[3][15:8], DI};
+          10'h007: regs[3] <= {DI, regs[3][7:0]};
+          10'h008: regs[4] <= {regs[4][15:8], DI};
+          10'h009: regs[4] <= {DI, regs[4][7:0]};
+          10'h00a: regs[5] <= {regs[5][15:8], DI};
+          10'h00b: regs[5] <= {DI, regs[5][7:0]};
+          10'h00c: regs[6] <= {regs[6][15:8], DI};
+          10'h00d: regs[6] <= {DI, regs[6][7:0]};
+          10'h00e: regs[7] <= {regs[7][15:8], DI};
+          10'h00f: regs[7] <= {DI, regs[7][7:0]};
+          10'h010: regs[8] <= {regs[8][15:8], DI};
+          10'h011: regs[8] <= {DI, regs[8][7:0]};
+          10'h012: regs[9] <= {regs[9][15:8], DI};
+          10'h013: regs[9] <= {DI, regs[9][7:0]};
+          10'h014: regs[10] <= {regs[10][15:8], DI};
+          10'h015: regs[10] <= {DI, regs[10][7:0]};
+          10'h016: regs[11] <= {regs[11][15:8], DI};
+          10'h017: regs[11] <= {DI, regs[11][7:0]};
+          10'h018: regs[12] <= {regs[12][15:8], DI};
+          10'h019: regs[12] <= {DI, regs[12][7:0]};
+          10'h01a: regs[13] <= {regs[13][15:8], DI};
+          10'h01b: regs[13] <= {DI, regs[13][7:0]};
+          10'h01c: begin
+            regs[14] <= {regs[14][15:8], DI};
+            // TODO: should update ROM buffer
+          end
+          10'h01d: begin
+            regs[14] <= {DI, regs[14][7:0]};
+            // TODO: should update ROM buffer
+          end
+          10'h01e: regs[15] <= {regs[15][15:8], DI};
+          10'h01f: begin
+            regs[15] <= {DI, regs[15][7:0]};
+            sfr[G] <= 1'b1;
+            state <= STATE_CPU1;
           end
 
           // Status flag register
@@ -444,48 +480,23 @@ always @(posedge clkin) begin
             sfr[ALT2] <= 1'b1;
             regs[PC] <= regs[PC] + 16'h1;
           end
-          OP_ADX: begin: adx_blk
-            reg [16:0] res;
-
+          OP_ADX: begin
             if (!alt1 && !alt2) begin
               // ADD Rn
-              res = regs[src_reg] + regs[imm];
+              res17 <= regs[src_reg] + regs[imm];
             end
             else if (alt1 && !alt2) begin
               // ADC Rn
-              res = regs[src_reg] + regs[imm] + cy;
+              res17 <= regs[src_reg] + regs[imm] + cy;
             end
             else if (!alt1 && alt2) begin
               // ADD #n
-              res = regs[src_reg] + imm;
+              res17 <= regs[src_reg] + imm;
             end
             else /* if (alt1 && alt2) */ begin
               // ADC #n
-              res = regs[src_reg] + imm + cy;
+              res17 <= regs[src_reg] + imm + cy;
             end
-
-            // Set flags
-            sfr[OV] <= (~(regs[src_reg] ^ (alt2 ? regs[imm] : imm))
-                  & ((alt2 ? regs[imm] : imm) ^ res)
-                  & 16'h8000) != 0;
-            sfr[S]  <= (res & 16'h8000) != 0;
-            sfr[CY] <= res >= 17'h10000;
-            sfr[Z]  <= (res & 16'hffff) == 0;
-
-            // Write the result
-            regs[dst_reg] <= res;
-
-            // Increment program counter if it was not set above
-            if (dst_reg != PC) begin
-              regs[PC] <= regs[PC] + 16'h1;
-            end
-
-            // Register reset
-            sfr[B]    <= 1'b0;
-            sfr[ALT1] <= 1'b0;
-            sfr[ALT2] <= 1'b0;
-            src_reg  <= 4'h0;
-            dst_reg  <= 4'h0;
           end
           OP_IWT: begin
             immr4 <= imm;
@@ -510,6 +521,30 @@ always @(posedge clkin) begin
       // Wait until the second byte of the instruction is in the cache
       if (cache_flag) begin
         casex (curr_op)
+          OP_ADX: begin
+            // Set flags
+            sfr[OV] <= (~(regs[src_reg] ^ (alt2 ? regs[imm] : imm))
+                  & ((alt2 ? regs[imm] : imm) ^ res17)
+                  & 16'h8000) != 0;
+            sfr[S]  <= (res17 & 16'h8000) != 0;
+            sfr[CY] <= res17 >= 17'h10000;
+            sfr[Z]  <= (res17 & 16'hffff) == 0;
+
+            // Write the result
+            regs[dst_reg] <= res17;
+
+            // Increment program counter if it was not set above
+            if (dst_reg != PC) begin
+              regs[PC] <= regs[PC] + 16'h1;
+            end
+
+            // Register reset
+            sfr[B]    <= 1'b0;
+            sfr[ALT1] <= 1'b0;
+            sfr[ALT2] <= 1'b0;
+            src_reg  <= 4'h0;
+            dst_reg  <= 4'h0;
+          end
           OP_BEQ:
           begin: op_beq_blk
             /*
