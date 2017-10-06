@@ -119,8 +119,16 @@ always @(posedge clkin) begin
   cache_byte = cache[RESOLVED_CACHE_PC];
 end
 
-/* Immediate part of current instruction */
+/* Cache flag of byte in cache pointed to by the program counter */
+reg cache_flag;
+always @(posedge clkin) begin
+  cache_flag = cache_flags[RESOLVED_CACHE_PC[8:4]];
+end
+
+/* Immediate parts of current instruction */
 wire [3:0] imm = cache_byte[3:0];
+reg [3:0] immr4;
+reg [7:0] immr8 [1:0];
 
 /* For plotting, two pixel caches. */
 reg[7:0] primary_pcache [7:0];
@@ -134,8 +142,9 @@ reg[7:0] state;
 parameter STATE_IDLE    = 8'b00000001;
 //parameter STATE_ROMWAIT = 8'b00000010;
 //parameter STATE_RAMWAIT = 8'b00000100;
-parameter STATE_FETCH1  = 8'b00010000;
-parameter STATE_FETCH2  = 8'b00100000;
+parameter STATE_FETCH1  = 8'b00001000;
+parameter STATE_FETCH2  = 8'b00010000;
+parameter STATE_FETCH3  = 8'b00100000;
 parameter STATE_EXEC    = 8'b01000000;
 parameter STATE_WBACK   = 8'b10000000;
 
@@ -145,10 +154,16 @@ parameter OP_ALT3 = 8'b00111111;
 parameter OP_ADX  = 8'b0101xxxx;
 parameter OP_BEQ  = 8'b00001001;
 parameter OP_NOP  = 8'b00000001;
+parameter OP_IWT  = 8'b1111xxxx; // Also LM, SM
+reg [7:0] curr_op;
 
 initial begin: initial_blk
+  reg [4:0] i;
   state = STATE_IDLE;
-  regs[PC] = 16'h0000;
+  for (i = 5'h0; i <= PC; i = i + 5'h1) begin
+    regs[i] = 16'h0000;
+  end
+  curr_op = OP_NOP;
 end
 
 always @(posedge clkin) begin
@@ -238,37 +253,68 @@ always @(posedge clkin) begin
       end
     end
     STATE_FETCH1: begin
-      //if (FETCH1_DONE)
-      // First, read first byte of instruction from cache
-      case (cache_byte)
-        OP_ALT1: begin
-          sfr[ALT1] <= 1'b1;
-          sfr[ALT2] <= 1'b0;
-          state <= STATE_FETCH2;
-          regs[PC] <= regs[PC] + 1;
-        end
-        OP_ALT2: begin
-          sfr[ALT1] <= 1'b0;
-          sfr[ALT2] <= 1'b1;
-          state <= STATE_FETCH2;
-          regs[PC] <= regs[PC] + 1;
-        end
-        OP_ALT3: begin
-          sfr[ALT1] <= 1'b1;
-          sfr[ALT2] <= 1'b1;
-          state <= STATE_FETCH2;
-          regs[PC] <= regs[PC] + 1;
-        end
-        default: state <= STATE_EXEC;
-      endcase
+      if (cache_flag) begin
+        // First, read first byte of instruction from cache
+        curr_op <= cache_byte;
+        casex (cache_byte)
+          OP_ALT1: begin
+            sfr[ALT1] <= 1'b1;
+            sfr[ALT2] <= 1'b0;
+            state <= STATE_FETCH2;
+            regs[PC] <= regs[PC] + 1;
+          end
+          OP_ALT2: begin
+            sfr[ALT1] <= 1'b0;
+            sfr[ALT2] <= 1'b1;
+            state <= STATE_FETCH2;
+            regs[PC] <= regs[PC] + 1;
+          end
+          OP_ALT3: begin
+            sfr[ALT1] <= 1'b1;
+            sfr[ALT2] <= 1'b1;
+            state <= STATE_FETCH2;
+            regs[PC] <= regs[PC] + 1;
+          end
+          OP_IWT: begin
+            state <= STATE_FETCH2;
+            immr4 <= imm;
+            regs[PC] <= regs[PC] + 1;
+          end
+          default: state <= STATE_EXEC;
+        endcase
+      end
     end
     STATE_FETCH2: begin
-      // Read second byte of instruction from cache
-      // XXX: are we supposed to do something here?
-      state <= STATE_EXEC;
+      // Wait until the second byte of the instruction is in the cache
+      if (cache_flag) begin
+        casex (curr_op)
+          OP_IWT: begin
+            state <= STATE_FETCH3;
+            immr8[0] <= cache_byte;
+            regs[PC] <= regs[PC] + 1;
+          end
+          default: begin
+            // The normal case, after a prefix instruction
+            curr_op <= cache_byte;
+            state <= STATE_EXEC;
+          end
+        endcase
+      end
+    end
+    STATE_FETCH3: begin
+      // Wait until the third byte of the instruction is in the cache
+      if (cache_flag) begin
+        casex (curr_op)
+          OP_IWT: begin
+            immr8[1] <= cache_byte;
+            state <= STATE_WBACK;
+          end
+          default: state <= STATE_EXEC;
+        endcase
+      end
     end
     STATE_EXEC: begin
-      casex (cache_byte)
+      casex (curr_op)
         OP_NOP:  begin
           // Just reset regs.
           sfr[B] <= 1'b0;
@@ -313,7 +359,7 @@ always @(posedge clkin) begin
       state <= STATE_WBACK;
     end
     STATE_WBACK: begin
-      casex (cache_byte)
+      casex (curr_op)
         OP_ADX: begin
           // Set flags
           sfr[OV] <= (~(regs[src_reg] ^ (alt2 ? regs[imm] : imm))
@@ -326,6 +372,19 @@ always @(posedge clkin) begin
           // Set result
           regs[dst_reg] <= res17;
           if (dst_reg != PC) begin
+            regs[PC] <= regs[PC] + 1;
+          end
+
+          // Register reset
+          sfr[B]    <= 1'b0;
+          sfr[ALT1] <= 1'b0;
+          sfr[ALT2] <= 1'b0;
+          src_reg  <= 4'h0;
+          dst_reg  <= 4'h0;
+        end
+        OP_IWT: begin
+          regs[immr4] <= {immr8[0], immr8[1]};
+          if (immr4 != PC) begin
             regs[PC] <= regs[PC] + 1;
           end
 
