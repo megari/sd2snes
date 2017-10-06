@@ -281,8 +281,8 @@ always @(posedge clkin) begin
 				sfr[B] <= 1'b0;
 				sfr[ALT1] <= 1'b0;
 				sfr[ALT2] <= 1'b0;
-				src_reg <= 3'h0;
-				dst_reg <= 3'h0;
+				src_reg <= 4'h0;
+				dst_reg <= 4'h0;
 			end
 			OP_ADX: begin
 				if (!alt1 && !alt2) begin
@@ -338,8 +338,8 @@ always @(posedge clkin) begin
 				sfr[B]    <= 1'b0;
 				sfr[ALT1] <= 1'b0;
 				sfr[ALT2] <= 1'b0;
-				src_reg  <= 3'h0;
-				dst_reg  <= 3'h0;
+				src_reg  <= 4'h0;
+				dst_reg  <= 4'h0;
 			end
 		endcase
 		pc <= pc + 1;
