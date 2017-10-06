@@ -445,7 +445,7 @@ always @(posedge clkin) begin
             regs[PC] <= regs[PC] + 16'h1;
           end
           OP_ADX: begin: adx_blk
-            reg [15:0] res;
+            reg [16:0] res;
 
             if (!alt1 && !alt2) begin
               // ADD Rn
