@@ -156,12 +156,10 @@ reg fetch_cached_insn;
 
 reg[7:0] state;
 parameter STATE_IDLE = 8'b00000001;
-//parameter STATE_ROMWAIT = 8'b00000010;
-//parameter STATE_RAMWAIT = 8'b00000100;
-parameter STATE_CPU1 = 8'b00001000;
-parameter STATE_CPU2 = 8'b00010000;
-parameter STATE_CPU3 = 8'b00100000;
-parameter STATE_CPU4 = 8'b01000000;
+parameter STATE_CPU1 = 8'b00000010;
+parameter STATE_CPU2 = 8'b00000100;
+parameter STATE_CPU3 = 8'b00001000;
+parameter STATE_CPU4 = 8'b00010000;
 
 parameter OP_ALT1 = 8'b00111101;
 parameter OP_ALT2 = 8'b00111110;
