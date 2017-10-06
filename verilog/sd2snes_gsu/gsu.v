@@ -266,7 +266,7 @@ assign MMIO_DO = MMIO_DOr;
 assign DO = mmio_enable ? MMIO_DO
             : 8'h00;
 
-wire [9:0] RESOLVED_CACHE_ADDR = (ADDR[9:0] + cbr) & 10'h1ff;
+wire [8:0] RESOLVED_CACHE_ADDR = (ADDR[9:0] + cbr) & 9'h1ff;
 
 always @(posedge clkin) begin
 	casex (ADDR[9:0])
@@ -359,7 +359,7 @@ always @(posedge clkin) begin
 			10'h1xx, 10'h2xx: begin
 				cache[RESOLVED_CACHE_ADDR] <= DI;
 				if (ADDR[0]) begin
-					cache_flags[RESOLVED_CACHE_ADDR[9:4]] <= 1'b1;
+					cache_flags[RESOLVED_CACHE_ADDR[8:4]] <= 1'b1;
 				end
 			end
 		endcase
