@@ -24,7 +24,9 @@ module gsu(
 	output [7:0] DO,
 	input [23:0] ADDR,
 	input CS,
-	input reg_we_rising
+	input reg_we_rising,
+	output ron,
+	output ran
 );
 
 wire mmio_enable = CS & !ADDR[22] & (ADDR[15:12] == 4'b0011) & (ADDR[15:0] < 16'h3040);
@@ -100,6 +102,10 @@ reg [3:0] src_reg;
 reg [3:0] dst_reg;
 
 reg [16:0] res17;
+
+/* ROM/RAM bus access flags */
+assign ron = scmr[4];
+assign ran = scmr[3];
 
 /* Cache RAM and cache flags */
 reg [7:0] cache [511:0];
