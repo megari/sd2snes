@@ -150,12 +150,13 @@ reg[7:0] secondary_pcache_flags;
 reg fetch_cached_insn;
 
 reg[7:0] state;
-parameter STATE_IDLE    = 8'b00000001;
+parameter STATE_IDLE = 8'b00000001;
 //parameter STATE_ROMWAIT = 8'b00000010;
 //parameter STATE_RAMWAIT = 8'b00000100;
-parameter STATE_FETCH1  = 8'b00001000;
-parameter STATE_FETCH2  = 8'b00010000;
-parameter STATE_FETCH3  = 8'b00100000;
+parameter STATE_CPU1 = 8'b00001000;
+parameter STATE_CPU2 = 8'b00010000;
+parameter STATE_CPU3 = 8'b00100000;
+parameter STATE_CPU4 = 8'b01000000;
 
 parameter OP_ALT1 = 8'b00111101;
 parameter OP_ALT2 = 8'b00111110;
@@ -166,12 +167,6 @@ parameter OP_NOP  = 8'b00000001;
 parameter OP_IWT  = 8'b1111xxxx; // Also LM, SM
 reg [7:0] curr_op;
 
-/* clkin is either 4 or 8 times as fast as
-   instructions are executed */
-parameter CLK_COUNT_MAX_FAST = 3'h3;
-parameter CLK_COUNT_MAX_SLOW = 3'h7;
-reg [2:0] clk_count;
-
 initial begin: initial_blk
   reg [4:0] i;
   state = STATE_IDLE;
@@ -179,7 +174,6 @@ initial begin: initial_blk
     regs[i] = 16'h0000;
   end
   curr_op = OP_NOP;
-  clk_count = 3'h0;
 end
 
 always @(posedge clkin) begin
@@ -214,7 +208,7 @@ always @(posedge clkin) begin
             end
             else if (ADDR[4:0] == {PC, 1'b1}) begin
               sfr[G] <= 1'b1;
-              state <= STATE_FETCH1;
+              state <= STATE_CPU1;
             end
           end
 
@@ -222,7 +216,7 @@ always @(posedge clkin) begin
           10'h030: begin
             sfr[7:0] <= {1'b0, DI[6:1], 1'b0};
             if (DI[G]) begin
-              state <= STATE_FETCH1;
+              state <= STATE_CPU1;
             end
           end
           10'h031: sfr[15:8] <= {DI[7], 2'b00, DI[4:0]};
@@ -268,8 +262,10 @@ always @(posedge clkin) begin
         endcase
       end
     end
-    STATE_FETCH1: begin
-      if ((clk_count == 3'h0) && cache_flag) begin
+    STATE_CPU1: begin
+      state <= STATE_CPU2;
+
+      if (cache_flag) begin
         // First, read first byte of instruction from cache
         curr_op <= cache_byte;
         casex (cache_byte)
@@ -277,22 +273,16 @@ always @(posedge clkin) begin
             sfr[ALT1] <= 1'b1;
             sfr[ALT2] <= 1'b0;
             regs[PC] <= regs[PC] + 16'h1;
-
-            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
           OP_ALT2: begin
             sfr[ALT1] <= 1'b0;
             sfr[ALT2] <= 1'b1;
             regs[PC] <= regs[PC] + 16'h1;
-
-            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
           OP_ALT3: begin
             sfr[ALT1] <= 1'b1;
             sfr[ALT2] <= 1'b1;
             regs[PC] <= regs[PC] + 16'h1;
-
-            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
           OP_ADX: begin: adx_blk
             reg [15:0] res;
@@ -336,14 +326,10 @@ always @(posedge clkin) begin
             sfr[ALT2] <= 1'b0;
             src_reg  <= 4'h0;
             dst_reg  <= 4'h0;
-
-            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
           OP_IWT: begin
             immr4 <= imm;
             regs[PC] <= regs[PC] + 16'h1;
-
-            state <= STATE_FETCH2;
           end
           OP_NOP:  begin
             // Just reset regs.
@@ -354,16 +340,15 @@ always @(posedge clkin) begin
             dst_reg <= 4'h0;
 
             regs[PC] <= regs[PC] + 16'h1;
-
-            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
-          default: state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
         endcase
       end
     end
-    STATE_FETCH2: begin
+    STATE_CPU2: begin
+      state <= STATE_CPU3;
+
       // Wait until the second byte of the instruction is in the cache
-      if ((clk_count == 3'h0) && cache_flag) begin
+      if (cache_flag) begin
         casex (curr_op)
           OP_BEQ:
           begin: op_beq_blk
@@ -378,21 +363,19 @@ always @(posedge clkin) begin
               regs[PC] <= $unsigned($signed(regs[PC]) + tmp);
             end
             */
-            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
           OP_IWT: begin
             immr8[0] <= cache_byte;
             regs[PC] <= regs[PC] + 16'h1;
-
-            state <= STATE_FETCH3;
           end
-          default: state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
         endcase
       end
     end
-    STATE_FETCH3: begin
+    STATE_CPU3: begin
+      state <= STATE_CPU4;
+
       // Wait until the third byte of the instruction is in the cache
-      if ((clk_count == 3'h0) && cache_flag) begin
+      if (cache_flag) begin
         casex (curr_op)
           OP_IWT: begin
             regs[immr4] <= {immr8[0], cache_byte};
@@ -406,21 +389,12 @@ always @(posedge clkin) begin
             sfr[ALT2] <= 1'b0;
             src_reg  <= 4'h0;
             dst_reg  <= 4'h0;
-
-            state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
           end
-          default: state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
         endcase
       end
     end
+    STATE_CPU4: state <= sfr[G] ? STATE_CPU1 : STATE_IDLE;
   endcase
-
-  if (clk_count >= (clsr ? CLK_COUNT_MAX_FAST : CLK_COUNT_MAX_SLOW)) begin
-    clk_count <= 3'h0;
-  end
-  else begin
-    clk_count <= clk_count + 3'h1;
-  end
 end
 
 /* MMIO read process */
