@@ -38,7 +38,7 @@ module address(
   output nmicmd_enable,
   output return_vector_enable,
   output branch1_enable,
-  output branch2_enable,
+  output branch2_enable
 );
 
 parameter [2:0]
@@ -52,12 +52,12 @@ wire [23:0] SRAM_SNES_ADDR;
       Bank 0x00-0x3f, Offset 8000-ffff
       Bank 0x40-0x5f, Offset 0000-ffff */
 
-assign IS_ROM = ((&~SNES_ADDR[23:22] & SNES_ADDR[15])
+assign IS_ROM = ((~|SNES_ADDR[23:22] & SNES_ADDR[15])
                  |(!SNES_ADDR[23] & SNES_ADDR[22] & !SNES_ADDR[21]));
 
 /* Save RAM (max. 128 kB) at:
        Bank 0x78-0x79, Offset 0000-ffff */
-assign IS_SAVERAM = SAVERAM_MASK[0] & (!SNES_ADDR[23] & &SNES_ADDR[22:20] & SNES_ADDR[19] & &~SNES_ADDR[18:17]);
+assign IS_SAVERAM = SAVERAM_MASK[0] & (!SNES_ADDR[23] & &SNES_ADDR[22:20] & SNES_ADDR[19] & ~|SNES_ADDR[18:17]);
 
 /* Gamepak RAM (max. 128 kB) at:
        Bank 0x00-0x3f, Offset 6000-7fff
@@ -72,8 +72,8 @@ assign IS_SAVERAM = SAVERAM_MASK[0] & (!SNES_ADDR[23] & &SNES_ADDR[22:20] & SNES
        Bank 0x70-0x71, Offset 0000-ffff
        Bank 0x80-0x8f, Offset 6000-7fff
 */
-wire IS_GAMEPAKRAM = ((&~SNES_ADDR[22:20] & (SNES_ADDR[15:13] == 3'b011))
-                      |(&SNES_ADDR[22:20] & &~SNES_ADDR[19:17]));
+wire IS_GAMEPAKRAM = ((~|SNES_ADDR[22:20] & (SNES_ADDR[15:13] == 3'b011))
+                      |(&SNES_ADDR[22:20] & ~|SNES_ADDR[19:17]));
 
 assign IS_WRITABLE = IS_SAVERAM;
 
@@ -97,13 +97,13 @@ assign IS_WRITABLE = IS_SAVERAM;
 assign SRAM_SNES_ADDR = IS_SAVERAM
                         ? (24'hE00000 | SNES_ADDR[16:0] & SAVERAM_MASK)
                         : (IS_ROM
-                           ? (&~SNES_ADDR[23:22] & SNES_ADDR[15])
+                           ? (~|SNES_ADDR[23:22] & SNES_ADDR[15])
                               ? /* Bank 0x00-0x3f, Offset 8000-ffff */
                                 ({3'b000, SNES_ADDR[21:16], SNES_ADDR[14:0]} & ROM_MASK)
                               : /* Bank 0x40-0x5f, Offset 0000-ffff */
                                 ({3'b000, SNES_ADDR[20:0]} & ROM_MASK)
                            : (IS_GAMEPAKRAM
-                              ? (&~SNES_ADDR[22:20] & (SNES_ADDR[15:13] == 3'b011))
+                              ? (~|SNES_ADDR[22:20] & (SNES_ADDR[15:13] == 3'b011))
                                  ? /* Banks 0x00-0x0f and 0x80-0x8f */
                                    ({7'b1100000, SNES_ADDR[19:16], SNES_ADDR[12:0]})
                                  : /* Banks 0x70-0x71 */

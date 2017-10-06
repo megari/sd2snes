@@ -78,13 +78,6 @@ wire [7:0] cache_douta;
 
 reg fetch_cached_insn;
 
-gsu_cache cache(
-	.clka(clk),
-	.addra(cache_addra),
-	.dina(cache_dina),
-	.wea(cache_wea),
-	.douta(cache_douta) );
-
 reg[0:0] state;
 /*
 parameter STATE_FETCHNLOAD = 2'b01;
