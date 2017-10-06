@@ -371,6 +371,7 @@ mcu_cmd snes_mcu_cmd(
   .msu_ptr_out(msu_ptr_addr),
   .msu_reset_out(msu_addr_reset),
   .featurebits_out(featurebits),
+  .gsu_reset_out(gsu_reset),
   .mcu_rrq(MCU_RRQ),
   .mcu_wrq(MCU_WRQ),
   .mcu_rq_rdy(MCU_RDY),
