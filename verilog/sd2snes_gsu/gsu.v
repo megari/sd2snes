@@ -71,12 +71,19 @@ reg [3:0] imm;
 reg [3:0] src_reg;
 reg [3:0] dst_reg;
 
+/* Cache RAM and cache flags */
 reg [7:0] cache [511:0];
+reg [31:0] cache_flags;
 
+/* XXX: old, useless cache stuff. Remove ASAP! */
 reg [8:0] cache_addra;
-reg [7:0] cache_dina;
-reg [0:0] cache_wea;
 wire [7:0] cache_douta;
+
+/* For plotting, two pixel caches. */
+reg[7:0] primary_pcache [7:0];
+reg[7:0] primary_pcache_flags;
+reg[7:0] secondary_pcache [7:0];
+reg[7:0] secondary_pcache_flags;
 
 reg fetch_cached_insn;
 
@@ -259,6 +266,8 @@ assign MMIO_DO = MMIO_DOr;
 assign DO = mmio_enable ? MMIO_DO
             : 8'h00;
 
+wire [9:0] RESOLVED_CACHE_ADDR = (ADDR[9:0] + cbr) & 10'h1ff;
+
 always @(posedge clkin) begin
 	casex (ADDR[9:0])
 		10'h000: MMIO_DOr <= regs[0][7:0];
@@ -330,14 +339,14 @@ always @(posedge clkin) begin
 		//10'h03d: Unused
 
 		// Cache base register
-		10'h03e: MMIO_DOr <= cbr[7:0];
+		10'h03e: MMIO_DOr <= {cbr[7:4], 4'b0000};
 		10'h03f: MMIO_DOr <= cbr[15:8];
 
 		// Color register: no access from SNES CPU
 		// Plot option register: no access from SNES CPU
 
 		// Cache RAM
-		//10'h1xx, 10'h2xx:
+		10'h1xx, 10'h2xx: MMIO_DOr <= cache[RESOLVED_CACHE_ADDR];
 
 		default: MMIO_DOr <= 8'hff;
 	endcase
@@ -345,8 +354,15 @@ end
 
 always @(posedge clkin) begin
 	if (MMIO_WR_EN) begin
-		//case (ADDR[9:0])
-		//endcase
+		casex (ADDR[9:0])
+			// Cache RAM
+			10'h1xx, 10'h2xx: begin
+				cache[RESOLVED_CACHE_ADDR] <= DI;
+				if (ADDR[0]) begin
+					cache_flags[RESOLVED_CACHE_ADDR[9:4]] <= 1'b1;
+				end
+			end
+		endcase
 	end
 end
 
