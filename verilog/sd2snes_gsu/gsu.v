@@ -30,37 +30,172 @@ module gsu(
 reg [2:0] clk_counter;
 reg clk;
 
+wire mmio_enable = CS & !ADDR[22] & (ADDR[15:12] == 4'b0011) & (ADDR[15:0] < 16'h3300);
+wire MMIO_WR_EN = mmio_enable & reg_we_rising;
+
+reg  [7:0] MMIO_DOr;
+wire [7:0] MMIO_DO;
+assign MMIO_DO = MMIO_DOr;
+
+assign DO = mmio_enable ? MMIO_DO
+            : 8'h00;
+
 reg [15:0] regs [0:13]; // General purpose registers R0~R13
+reg [15:0] regs_int [0:13];
+reg [15:0] regs_mmio [0:13];
+always @(MMIO_WR_EN,
+         regs_mmio[0], regs_mmio[1], regs_mmio[2], regs_mmio[3], regs_mmio[4], regs_mmio[5],
+         regs_mmio[6], regs_mmio[7], regs_mmio[8], regs_mmio[9], regs_mmio[10], regs_mmio[11],
+         regs_mmio[12], regs_mmio[13],
+         regs_int[0], regs_int[1], regs_int[2], regs_int[3], regs_int[4], regs_int[5],
+         regs_int[6], regs_int[7], regs_int[8], regs_int[9], regs_int[10], regs_int[11],
+         regs_int[12], regs_int[13]) begin
+	regs[0] <= MMIO_WR_EN ? regs_mmio[0] : regs_int[0];
+	regs[1] <= MMIO_WR_EN ? regs_mmio[1] : regs_int[1];
+	regs[2] <= MMIO_WR_EN ? regs_mmio[2] : regs_int[2];
+	regs[3] <= MMIO_WR_EN ? regs_mmio[3] : regs_int[3];
+	regs[4] <= MMIO_WR_EN ? regs_mmio[4] : regs_int[4];
+	regs[5] <= MMIO_WR_EN ? regs_mmio[5] : regs_int[5];
+	regs[6] <= MMIO_WR_EN ? regs_mmio[6] : regs_int[6];
+	regs[7] <= MMIO_WR_EN ? regs_mmio[7] : regs_int[7];
+	regs[8] <= MMIO_WR_EN ? regs_mmio[8] : regs_int[8];
+	regs[9] <= MMIO_WR_EN ? regs_mmio[9] : regs_int[9];
+	regs[10] <= MMIO_WR_EN ? regs_mmio[10] : regs_int[10];
+	regs[11] <= MMIO_WR_EN ? regs_mmio[11] : regs_int[11];
+	regs[12] <= MMIO_WR_EN ? regs_mmio[12] : regs_int[12];
+	regs[13] <= MMIO_WR_EN ? regs_mmio[13] : regs_int[13];
+end
 reg [15:0] rap;         // Game Pak ROM address pointer: R14
+reg [15:0] rap_int;
+reg [15:0] rap_mmio;
+always @(MMIO_WR_EN, rap_mmio, rap_int) begin
+	rap <= MMIO_WR_EN ? rap_mmio : rap_int;
+end
 reg [15:0] pc;          // Program counter: R15
+reg [15:0] pc_int;
+reg [15:0] pc_mmio;
+always @(MMIO_WR_EN, pc_mmio, pc_int) begin
+	pc <= MMIO_WR_EN ? pc_mmio : pc_int;
+end
 
 // Status/flag register flags
 reg z;    // Zero
+reg z_int;
+reg z_mmio;
+always @(MMIO_WR_EN, z_mmio, z_int) begin
+	z <= MMIO_WR_EN ? z_mmio : z_int;
+end
 reg cy;   // Carry
+reg cy_int;
+reg cy_mmio;
+always @(MMIO_WR_EN, cy_mmio, cy_int) begin
+	cy <= MMIO_WR_EN ? cy_mmio : cy_int;
+end
 reg s;    // Sign
+reg s_int;
+reg s_mmio;
+always @(MMIO_WR_EN, s_mmio, s_int) begin
+	s <= MMIO_WR_EN ? s_mmio : s_int;
+end
 reg ov;   // Overflow
+reg ov_int;
+reg ov_mmio;
+always @(MMIO_WR_EN, ov_mmio, ov_int) begin
+	ov <= MMIO_WR_EN ? ov_mmio : ov_int;
+end
 reg g;    // Go
+reg g_int;
+reg g_mmio;
+always @(MMIO_WR_EN, g_mmio, g_int) begin
+	g <= MMIO_WR_EN ? g_mmio : g_int;
+end
 reg r;    // Reading ROM using R14
+reg r_int;
+reg r_mmio;
+always @(MMIO_WR_EN, r_mmio, r_int) begin
+	r <= MMIO_WR_EN ? r_mmio : r_int;
+end
 reg alt1; // Mode flag for next insn
+reg alt1_int;
+reg alt1_mmio;
+always @(MMIO_WR_EN, alt1_mmio, alt1_int) begin
+	alt1 <= MMIO_WR_EN ? alt1_mmio : alt1_int;
+end
 reg alt2; // Mode flag for next insn
+reg alt2_int;
+reg alt2_mmio;
+always @(MMIO_WR_EN, alt2_mmio, alt2_int) begin
+	alt2 <= MMIO_WR_EN ? alt2_mmio : alt2_int;
+end
 reg il;   // Immediate lower
+reg il_int;
+reg il_mmio;
+always @(MMIO_WR_EN, il_mmio, il_int) begin
+	il <= MMIO_WR_EN ? il_mmio : il_int;
+end
 reg ih;   // Immediate higher
+reg ih_int;
+reg ih_mmio;
+always @(MMIO_WR_EN, ih_mmio, ih_int) begin
+	ih <= MMIO_WR_EN ? ih_mmio : ih_int;
+end
 reg b;    // Instruction executed with WITH
+reg b_int;
+reg b_mmio;
+always @(MMIO_WR_EN, b_mmio, b_int) begin
+	b <= MMIO_WR_EN ? b_mmio : b_int;
+end
 reg irq;  // Interrupt
+reg irq_int;
+reg irq_mmio;
+always @(MMIO_WR_EN, irq_mmio, irq_int) begin
+	irq <= MMIO_WR_EN ? irq_mmio : irq_int;
+end
 
 reg [7:0] pbr;   // Program bank register
+reg [7:0] pbr_int;
+reg [7:0] pbr_mmio;
+always @(MMIO_WR_EN, pbr_mmio, pbr_int) begin
+	pbr <= MMIO_WR_EN ? pbr_mmio : pbr_int;
+end
 reg [7:0] rombr; // Game Pak ROM bank register
 reg rambr;       // Game Pak RAM bank register
 reg [15:0] cbr;  // Cache base register. [3:0] are always 0.
                  // TODO: why not make the register only 12 bits wide?
 reg [7:0] scbr;  // Screen base register
+reg [7:0] scbr_int;
+reg [7:0] scbr_mmio;
+always @(MMIO_WR_EN, scbr_mmio, scbr_int) begin
+	scbr <= MMIO_WR_EN ? scbr_mmio : scbr_int;
+end
 reg [5:0] scmr;  // Screen mode register
+reg [5:0] scmr_int;
+reg [5:0] scmr_mmio;
+always @(MMIO_WR_EN, scmr_mmio, scmr_int) begin
+	scmr <= MMIO_WR_EN ? scmr_mmio : scmr_int;
+end
 reg [7:0] colr;  // Color register
 reg [4:0] por;   // Plot option register
 reg bramr;       // Back-up RAM register
+reg bramr_int;
+reg bramr_mmio;
+always @(MMIO_WR_EN, bramr_mmio, bramr_int) begin
+	bramr <= MMIO_WR_EN ? bramr_mmio : bramr_int;
+end
+
 reg [7:0] vcr;   // Version code register
 reg [7:0] cfgr;  // Config register
+reg [7:0] cfgr_int;
+reg [7:0] cfgr_mmio;
+always @(MMIO_WR_EN, cfgr_mmio, cfgr_int) begin
+	cfgr <= MMIO_WR_EN ? cfgr_mmio : cfgr_int;
+end
 reg clsr;        // Clock select register
+reg clsr_int;
+reg clsr_mmio;
+always @(MMIO_WR_EN, clsr_mmio, clsr_int) begin
+	clsr <= MMIO_WR_EN ? clsr_mmio : clsr_int;
+end
 
 reg [7:0] curr_insn [0:2];
 reg [1:0] insn_idx;
@@ -188,11 +323,11 @@ always @(posedge clk) begin // Should probably use clock in divided by 4 or 8
 			OP_NOP:
 			begin
 				// Just reset regs.
-				b    = 1'b0;
-				alt1 = 1'b0;
-				alt2 = 1'b0;
-				src_reg = 3'h0;
-				dst_reg = 3'h0;
+				b_int <= 1'b0;
+				alt1_int <= 1'b0;
+				alt2_int <= 1'b0;
+				src_reg <= 3'h0;
+				dst_reg <= 3'h0;
 			end
 `define NONE2 1
 `ifdef NONE2
@@ -218,33 +353,33 @@ always @(posedge clk) begin // Should probably use clock in divided by 4 or 8
 				end
 
 				// Set flags
-				ov  <= (~(regs[src_reg] ^ regs[imm])
+				ov_int <= (~(regs[src_reg] ^ regs[imm])
 							& (regs[imm] ^ tmp)
 							& 16'h8000) != 0;
-				s   <= (tmp & 16'h8000) != 0;
-				cy  <= tmp >= 17'h10000;
-				z   <= (tmp & 16'hffff) == 0;
+				s_int  <= (tmp & 16'h8000) != 0;
+				cy_int <= tmp >= 17'h10000;
+				z_int  <= (tmp & 16'hffff) == 0;
 
 				// Set result
-				regs[dst_reg] = tmp;
+				regs_int[dst_reg] = tmp;
 
 				// Register reset
-				b    = 1'b0;
-				alt1 = 1'b0;
-				alt2 = 1'b0;
-				src_reg = 3'h0;
-				dst_reg = 3'h0;
+				b_int    <= 1'b0;
+				alt1_int <= 1'b0;
+				alt2_int <= 1'b0;
+				src_reg  <= 3'h0;
+				dst_reg  <= 3'h0;
 			end
 			OP_BEQ:
 			begin: op_beq_blk
 				reg signed [7:0] tmp;
 				tmp = pipeline;
-				pc = pc + 1'b1;
+				pc_int = pc + 1'b1;
 				//pipeline = 8'b1; // XXX: NOP for now. Should read.
 				//fetch_next_cached_insn;
 				if (z) begin
 					// XXX this is ugly!
-					pc = $unsigned($signed(pc) + tmp);
+					pc_int = $unsigned($signed(pc) + tmp);
 				end
 			end
 `endif
@@ -255,16 +390,6 @@ always @(posedge clk) begin // Should probably use clock in divided by 4 or 8
 	end
 `endif
 end
-
-wire mmio_enable = CS & !ADDR[22] & (ADDR[15:12] == 4'b0011) & (ADDR[15:0] < 16'h3300);
-wire MMIO_WR_EN = mmio_enable & reg_we_rising;
-
-reg  [7:0] MMIO_DOr;
-wire [7:0] MMIO_DO;
-assign MMIO_DO = MMIO_DOr;
-
-assign DO = mmio_enable ? MMIO_DO
-            : 8'h00;
 
 wire [8:0] RESOLVED_CACHE_ADDR = (ADDR[9:0] + cbr) & 9'h1ff;
 
@@ -355,6 +480,95 @@ end
 always @(posedge clkin) begin
 	if (MMIO_WR_EN) begin
 		casex (ADDR[9:0])
+			10'h000: regs_mmio[0][7:0] <= DI;
+			10'h001: regs_mmio[0][15:8] <= DI;
+			10'h002: regs_mmio[1][7:0] <= DI;
+			10'h003: regs_mmio[1][15:8] <= DI;
+			10'h004: regs_mmio[2][7:0] <= DI;
+			10'h005: regs_mmio[2][15:8] <= DI;
+			10'h006: regs_mmio[3][7:0] <= DI;
+			10'h007: regs_mmio[3][15:8] <= DI;
+			10'h008: regs_mmio[4][7:0] <= DI;
+			10'h009: regs_mmio[4][15:8] <= DI;
+			10'h00a: regs_mmio[5][7:0] <= DI;
+			10'h00b: regs_mmio[5][15:8] <= DI;
+			10'h00c: regs_mmio[6][7:0] <= DI;
+			10'h00d: regs_mmio[6][15:8] <= DI;
+			10'h00e: regs_mmio[7][7:0] <= DI;
+			10'h00f: regs_mmio[7][15:8] <= DI;
+			10'h010: regs_mmio[8][7:0] <= DI;
+			10'h011: regs_mmio[8][15:8] <= DI;
+			10'h012: regs_mmio[9][7:0] <= DI;
+			10'h013: regs_mmio[9][15:8] <= DI;
+			10'h014: regs_mmio[10][7:0] <= DI;
+			10'h015: regs_mmio[10][15:8] <= DI;
+			10'h016: regs_mmio[11][7:0] <= DI;
+			10'h017: regs_mmio[11][15:8] <= DI;
+			10'h018: regs_mmio[12][7:0] <= DI;
+			10'h019: regs_mmio[12][15:8] <= DI;
+			10'h01a: regs_mmio[13][7:0] <= DI;
+			10'h01b: regs_mmio[13][15:8] <= DI;
+			10'h01c: rap_mmio[7:0] <= DI;
+			10'h01d: rap_mmio[15:8] <= DI;
+			10'h01e: pc_mmio[7:0] <= DI;
+			10'h01f: pc_mmio[15:8] <= DI;
+
+			// Status flag register
+			10'h030: begin
+				r_mmio <= DI[6];
+				g_mmio <= DI[5];
+				ov_mmio <= DI[4];
+				s_mmio <= DI[3];
+				cy_mmio <= DI[2];
+				z_mmio <= DI[1];
+			end
+			10'h031: begin
+				irq_mmio <= DI[7];
+				b_mmio <= DI[4];
+				ih_mmio <= DI[3];
+				il_mmio <= DI[2];
+				alt2_mmio <= DI[1];
+				alt1_mmio <= DI[0];
+			end
+
+			//10'h032: Unused
+
+			// Back-up RAM register
+			10'h033: bramr_mmio <= DI[0];
+
+			// Program bank register
+			10'h034: pbr_mmio <= DI;
+
+			// Game Pak ROM bank register: read only
+			//10'h036: rombr <= DI;
+
+			// Config register:
+			10'h037: cfgr_mmio <= {DI[7], 1'b0, DI[5], 5'b00000};
+
+			// Screen base register
+			10'h038: scbr_mmio <= DI;
+
+			// Clock select register
+			10'h039: clsr_mmio <= DI[0];
+
+			// Screen mode register
+			10'h03a: scmr_mmio <= DI[5:0];
+
+			// Version code register: read only
+			//10'h03b: vcr <= DI;
+
+			// Game Pak RAM bank register: read only
+			//10'h03c: rambr <= DI[0];
+
+			//10'h03d: Unused
+
+			// Cache base register: read only
+			//10'h03e: cbr[7:0] <= {DI[7:4], 4'b0000};
+			//10'h03f: cbr[15:8] <= DI;
+
+			// Color register: no access from SNES CPU
+			// Plot option register: no access from SNES CPU
+
 			// Cache RAM
 			10'h1xx, 10'h2xx: begin
 				cache[RESOLVED_CACHE_ADDR] <= DI;
