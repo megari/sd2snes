@@ -50,7 +50,12 @@ wire [23:0] SRAM_SNES_ADDR;
 
 /* ROM (max. 2 MB) at:
       Bank 0x00-0x3f, Offset 8000-ffff
-      Bank 0x40-0x5f, Offset 0000-ffff */
+      Bank 0x40-0x5f, Offset 0000-ffff
+
+   XXX: higan also accepts the following:
+      Bank 0x00-0x3f, Offset 0000-7fff
+          This duplicates the mapping in the 0000-7fff range.
+*/
 
 assign IS_ROM = ((~|SNES_ADDR[23:22] & SNES_ADDR[15])
                  |(!SNES_ADDR[23] & SNES_ADDR[22] & !SNES_ADDR[21]));
@@ -71,6 +76,10 @@ assign IS_SAVERAM = SAVERAM_MASK[0] & (!SNES_ADDR[23] & &SNES_ADDR[22:20] & SNES
        Bank 0x00-0x0f, Offset 6000-7fff
        Bank 0x70-0x71, Offset 0000-ffff
        Bank 0x80-0x8f, Offset 6000-7fff
+
+   XXX: higan maps the gamepak RAM at:
+       Bank 0x60-0x7f, Offset 0000-ffff
+           This effectively duplicates the mapping in 0x60-0x61, 0x62-0x63, etc.
 */
 wire IS_GAMEPAKRAM = ((~|SNES_ADDR[22:20] & (SNES_ADDR[15:13] == 3'b011))
                       |(&SNES_ADDR[22:20] & ~|SNES_ADDR[19:17]));
@@ -78,8 +87,9 @@ wire IS_GAMEPAKRAM = ((~|SNES_ADDR[22:20] & (SNES_ADDR[15:13] == 3'b011))
 assign IS_WRITABLE = IS_SAVERAM;
 
 /* The Save RAM, ROM and gamepak RAM are laid out in the physical RAM as follows:
-   Save RAM address aaaa bbbc xxxx xxxx xxxx xxxx mapped to:
-       1110 000c xxxx xxxx xxxx xxxx, max. 2^17 B = 128 kB
+   Save RAM addresses:
+       Bank 0x78-0x79: 0111 100a xxxx xxxx xxxx xxxx mapped to:
+           1110 000a xxxx xxxx xxxx xxxx
    ROM addresses:
        Bank 0x00-0x3f: address 00aa bbbb 1xxx xxxx xxxx xxxx mapped to:
            000a abbb bxxx xxxx xxxx xxxx
