@@ -123,7 +123,7 @@ reg[7:0] secondary_pcache_flags;
 
 reg fetch_cached_insn;
 
-reg[5:0] state;
+reg[7:0] state;
 parameter STATE_IDLE    = 8'b00000001;
 //parameter STATE_ROMWAIT = 8'b00000010;
 //parameter STATE_RAMWAIT = 8'b00000100;
@@ -317,6 +317,7 @@ always @(posedge clkin) begin
 			end
 			*/
 		endcase
+		state <= STATE_WBACK;
 	end
 	STATE_WBACK: begin
 		casex (cache_byte)
