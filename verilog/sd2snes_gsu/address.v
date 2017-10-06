@@ -116,10 +116,11 @@ assign ROM_HIT = IS_ROM | IS_WRITABLE;
 
 assign msu_enable = featurebits[FEAT_MSU1] & (!SNES_ADDR[22] && ((SNES_ADDR[15:0] & 16'hfff8) == 16'h2000));
 
-/* Something similar to this for the GSU:
-wire cx4_enable_w = (!SNES_ADDR[22] && (SNES_ADDR[15:13] == 3'b011));
-assign cx4_enable = cx4_enable_w;
-*/
+/* GSU MMIO interface is at:
+       Bank 0x00-0x3f, Offset 3000-32ff
+       Bank 0x80-0xbf, Offset 3000-32ff */
+wire gsu_enable_w = (!SNES_ADDR[22] & (SNES_ADDR[15:10] == 6'b001100) & (!SNES_ADDR[9] | !SNES_ADDR[8]));
+assign gsu_enable = gsu_enable_w;
 
 assign r213f_enable = featurebits[FEAT_213F] & (SNES_PA == 8'h3f);
 
