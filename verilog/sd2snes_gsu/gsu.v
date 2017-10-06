@@ -25,6 +25,17 @@ module gsu(
   input [23:0] ADDR,
   input CS,
   input reg_we_rising,
+  input [7:0] ROM_BUS_DI,
+  output [23:0] ROM_BUS_ADDR,
+  output ROM_BUS_RRQ,
+  input ROM_BUS_RDY,
+  input [7:0] RAM_BUS_DI,
+  input [7:0] RAM_BUS_DO,
+  output [23:0] RAM_BUS_ADDR,
+  output RAM_BUS_RRQ,
+  output RAM_BUS_WRQ,
+  input RAM_BUS_RDY,
+  output gsu_active,
   output ron,
   output ran
 );
@@ -100,6 +111,8 @@ reg [7:0] pipeline;
 
 reg [3:0] src_reg;
 reg [3:0] dst_reg;
+
+assign gsu_active = sfr[G]; // XXX: think about whether this is good enough
 
 /* ROM/RAM bus access flags */
 assign ron = scmr[4];
