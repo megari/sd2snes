@@ -122,23 +122,30 @@ assign ran = scmr[3];
 reg [31:0] cache_flags;
 initial cache_flags = 32'h00000000;
 
-wire [7:0] cache_out;
+wire [7:0] cache_outa;
 wire [7:0] cache_in;
-wire [8:0] cache_addr;
+wire [8:0] cache_addra;
 wire cache_we;
 wire [7:0] cache_byte;
 
+wire [7:0] cache_outb;
+wire [8:0] cache_addrb;
+
 gsu_cache cache (
-  .douta(cache_out),
+  .douta(cache_outa),
   .dina(cache_in),
-  .addra(cache_addr),
+  .addra(cache_addra),
   .wea(cache_we),
-  .doutb(cache_byte),
+  .doutb(cache_outb),
+  .addrb(cache_addrb),
   .clk(clkin)
 );
 
 wire [8:0] RESOLVED_CACHE_ADDR = (ADDR[9:0] + cbr) & 9'h1ff;
 wire [8:0] RESOLVED_CACHE_PC = (regs[PC][9:0] + cbr) & 9'h1ff;
+
+assign cache_addrb = RESOLVED_CACHE_ADDR;
+assign cache_byte = cache_outa;
 
 /* Cache flag of byte in cache pointed to by the program counter */
 wire cache_flag = cache_flags[RESOLVED_CACHE_PC[8:4]];
@@ -182,20 +189,20 @@ initial begin: initial_blk
 end
 
 reg [2:0] gsu_busy;
-parameter BUSY_CACHE  = 2'b00;
-parameter BUSY_CACHE2 = 2'b01;
-parameter BUSY_CPU    = 2'b10;
+parameter BUSY_CACHE      = 2'b00;
+parameter BUSY_CACHE_SCPU = 2'b01;
+parameter BUSY_CPU        = 2'b10;
 //assign gsu_busy_out = gsu_busy;
 assign gsu_active = |gsu_busy;
 
-reg [7:0] saved_di_r;
-initial saved_di_r = 8'h00;
+reg [7:0] scpu_di_r;
+initial scpu_di_r = 8'h00;
 
-reg [8:0] gsu_cache_addr;
-initial gsu_cache_addr = 9'h000;
+reg [8:0] gsu_cache_addra;
+initial gsu_cache_addra = 9'h000;
 
-reg [8:0] scpu_cache_addr;
-initial scpu_cache_addr = 9'h000;
+reg [8:0] scpu_cache_addra;
+initial scpu_cache_addra = 9'h000;
 
 reg gsu_cache_we;
 initial gsu_cache_we = 1'b0;
@@ -203,14 +210,14 @@ initial gsu_cache_we = 1'b0;
 reg scpu_cache_we;
 initial scpu_cache_we = 1'b0;
 
-assign cache_in = gsu_busy[BUSY_CACHE]  ? ROM_BUS_DI
-                : gsu_busy[BUSY_CACHE2] ? saved_di_r
+assign cache_in = gsu_busy[BUSY_CACHE]      ? ROM_BUS_DI
+                : gsu_busy[BUSY_CACHE_SCPU] ? scpu_di_r
                 : 8'h00;
-assign cache_addr = gsu_busy[BUSY_CACHE]  ? gsu_cache_addr
-                  : gsu_busy[BUSY_CACHE2] ? scpu_cache_addr
-                  : 9'h000;
-assign cache_we = gsu_busy[BUSY_CACHE]  ? gsu_cache_we
-                : gsu_busy[BUSY_CACHE2] ? scpu_cache_we
+assign cache_addra = gsu_busy[BUSY_CACHE]      ? gsu_cache_addra
+                   : gsu_busy[BUSY_CACHE_SCPU] ? scpu_cache_addra
+                   : RESOLVED_CACHE_PC;
+assign cache_we = gsu_busy[BUSY_CACHE]      ? gsu_cache_we
+                : gsu_busy[BUSY_CACHE_SCPU] ? scpu_cache_we
                 : 1'b0;
 
 reg [23:0] CACHE_SRC_ADDRr;
@@ -247,14 +254,6 @@ parameter ST_CACHE_ADDR  = 5'b01000;
 parameter ST_CACHE_END   = 5'b10000;
 initial CACHE_ST = ST_CACHE_IDLE;
 
-reg [4:0] CACHE2_ST;
-parameter ST_CACHE2_IDLE  = 5'b00001;
-parameter ST_CACHE2_START = 5'b00010;
-parameter ST_CACHE2_WAIT  = 5'b00100;
-parameter ST_CACHE2_ADDR  = 5'b01000;
-parameter ST_CACHE2_END   = 5'b10000;
-initial CACHE2_ST = ST_CACHE2_IDLE;
-
 reg CACHE_TRIG_ENr;
 reg CACHE_TRIG_EN2r;
 reg cpu_cache_en;
@@ -266,92 +265,93 @@ end
 always @(posedge clkin) CACHE_TRIG_EN2r <= CACHE_TRIG_ENr;
 wire CACHE_TRIG_EN = CACHE_TRIG_EN2r;
 
-/* FSM for writing to cache from the S-CPU */
-always @(posedge clkin) begin
-  case (CACHE2_ST)
-    ST_CACHE2_IDLE: begin
-      CACHE2_ST <= ST_CACHE2_IDLE;
-      if (CACHE_WR_EN && CACHE_ST == ST_CACHE_IDLE && ~gsu_busy[BUSY_CACHE]) begin
-        CACHE2_ST <= ST_CACHE2_START;
-        scpu_cache_addr <= RESOLVED_CACHE_ADDR;
-        saved_di_r <= DI;
-        gsu_busy[BUSY_CACHE2] <= 1'b1;
-      end
-    end
-    ST_CACHE2_START: begin
-      CACHE2_ST <= ST_CACHE2_WAIT;
-    end
-    ST_CACHE2_WAIT: begin
-      CACHE2_ST <= ST_CACHE2_ADDR;
-      scpu_cache_we <= 1'b1;
-    end
-    ST_CACHE2_ADDR: begin
-      CACHE2_ST <= ST_CACHE2_IDLE;
-      gsu_busy[BUSY_CACHE2] <= 1'b0;
-      scpu_cache_we <= 1'b0;
-      // the write will have hit the cache by the next cycle
-    end
-  endcase
-end
+/* FSM for writing to cache. There are two paths:
+    1) Filling a non-resident cache block from ROM through internal operation
+      - Source address: program counter
+      - Address in cache: (cache base + program counter) & 0x1f0
+      - Total bytes read and written: 16
+    2) Writing to the cache from the S-CPU
+      - Source data: wire DI from main.v
+      - Address in cache: (cache base + ADDR[9:0]) & 0x1ff
+      - Total bytes read and written: 1
 
-/* FSM for filling a cache block through internal operation */
+   Filling non-resident cache blocks has priority. */
 reg [3:0] cache_count;
 initial cache_count = 4'b0;
 always @(posedge clkin) begin
   case(CACHE_ST)
     ST_CACHE_IDLE: begin
-      if(~CACHE_WR_EN & ~gsu_busy[BUSY_CACHE2] & CACHE_TRIG_EN & ~cache_flags[RESOLVED_CACHE_PC[8:4] /* XXX */]) begin
+      if(CACHE_TRIG_EN & ~cache_flags[RESOLVED_CACHE_PC[8:4] /* XXX */]) begin
         CACHE_ST <= ST_CACHE_START;
         gsu_busy[BUSY_CACHE] <= 1'b1;
-      end else if(~CACHE_WR_EN & ~gsu_busy[BUSY_CACHE2] & cpu_cache_en & ~cache_flags[RESOLVED_CACHE_PC[8:4] /* XXX */]) begin
+      end
+      else if(cpu_cache_en & ~cache_flags[RESOLVED_CACHE_PC[8:4] /* XXX */]) begin
         CACHE_ST <= ST_CACHE_START;
         gsu_busy[BUSY_CACHE] <= 1'b1;
+      end
+      else if (CACHE_WR_EN) begin
+        CACHE_ST <= ST_CACHE_START;
+        gsu_busy[BUSY_CACHE_SCPU] <= 1'b1;
+      end else CACHE_ST <= ST_CACHE_IDLE;
+    end
+    ST_CACHE_START: begin
+      if (gsu_busy[BUSY_CACHE]) begin
+        CACHE_ST <= ST_CACHE_WAIT;
+        CACHE_SRC_ADDRr <= regs[PC] /* XXX */;
+        gsu_cache_addra <= {RESOLVED_CACHE_PC[8:4], 4'h0} /* XXX */;
+        cache_count <= 4'b0;
+        CACHE_ROM_BUS_RRQr <= 1'b1;
+      end
+      else if (gsu_busy[BUSY_CACHE_SCPU]) begin
+        CACHE_ST <= ST_CACHE_WAIT;
+        scpu_cache_addra <= RESOLVED_CACHE_ADDR;
+        scpu_di_r <= DI;
+      end else CACHE_ST <= ST_CACHE_IDLE;
+    end
+    ST_CACHE_WAIT: begin
+      if (gsu_busy[BUSY_CACHE]) begin
+        CACHE_ROM_BUS_RRQr <= 1'b0;
+        if(~CACHE_ROM_BUS_RRQr & ROM_BUS_RDY) begin
+          CACHE_ST <= ST_CACHE_ADDR;
+          gsu_cache_we <= 1'b1;
+        end else CACHE_ST <= ST_CACHE_WAIT;
+      end
+      else if (gsu_busy[BUSY_CACHE_SCPU]) begin
+        CACHE_ST <= ST_CACHE_ADDR;
+        scpu_cache_we <= 1'b1;
       end
       else CACHE_ST <= ST_CACHE_IDLE;
     end
-    ST_CACHE_START: begin
-      gsu_busy[BUSY_CACHE] <= 1'b1;
-      CACHE_SRC_ADDRr <= cbr + 1'b0/* XXX */;
-      gsu_cache_addr <= {RESOLVED_CACHE_PC[8:4], 4'h0} /* XXX */;
-      CACHE_ST <= ST_CACHE_WAIT;
-      cache_count <= 4'b0;
-      CACHE_ROM_BUS_RRQr <= 1'b1;
-    end
-    ST_CACHE_WAIT: begin
-      CACHE_ROM_BUS_RRQr <= 1'b0;
-      if(~CACHE_ROM_BUS_RRQr & ROM_BUS_RDY) begin
-        CACHE_ST <= ST_CACHE_ADDR;
-        gsu_cache_we <= 1'b1;
-        cache_count <= cache_count + 1;
-      end else CACHE_ST <= ST_CACHE_WAIT;
-    end
     ST_CACHE_ADDR: begin
-      gsu_cache_we <= 1'b0;
-      CACHE_SRC_ADDRr <= CACHE_SRC_ADDRr + 1;
-      gsu_cache_addr <= (gsu_cache_addr + 10'b1) & 9'h1ff;
-      if (cache_count == 4'hf) begin
-        gsu_busy[BUSY_CACHE] <= 1'b0;
-        CACHE_ST <= ST_CACHE_IDLE;
-      end else begin
-        CACHE_ROM_BUS_RRQr <= 1'b1;
-        CACHE_ST <= ST_CACHE_WAIT;
+      if (gsu_busy[BUSY_CACHE]) begin
+        gsu_cache_we <= 1'b0;
+        CACHE_SRC_ADDRr <= CACHE_SRC_ADDRr + 1;
+        cache_count <= cache_count + 1;
+        gsu_cache_addra <= (gsu_cache_addra + 10'b1) & 9'h1ff;
+        if (cache_count == 4'hf) begin
+          // Set the cache flag, as the last byte in the cache block was written
+          cache_flags[gsu_cache_addra[8:4]] <= 1'b1;
+          gsu_busy[BUSY_CACHE] <= 1'b0;
+          CACHE_ST <= ST_CACHE_IDLE;
+        end
+        else begin
+          CACHE_ROM_BUS_RRQr <= 1'b1;
+          CACHE_ST <= ST_CACHE_WAIT;
+        end
       end
+      else if (gsu_busy[BUSY_CACHE_SCPU]) begin
+        CACHE_ST <= ST_CACHE_IDLE;
+        gsu_busy[BUSY_CACHE_SCPU] <= 1'b0;
+        scpu_cache_we <= 1'b0;
+
+        // Set the cache flag if the last byte in the cache block was written
+        if (&scpu_cache_addra[3:0]) begin
+          cache_flags[scpu_cache_addra[8:4]] <= 1'b1;
+        end
+        // the write will have hit the cache by the next cycle
+      end else CACHE_ST <= ST_CACHE_IDLE;
     end
   endcase
-end
-
-/* Cache flag management */
-always @(posedge clkin) begin
-  if (CACHE_ST == ST_CACHE_ADDR) begin
-    if (&gsu_cache_addr[3:0]) begin
-      cache_flags[gsu_cache_addr[8:4]] <= 1'b1;
-    end
-  end
-  else if (CACHE2_ST == ST_CACHE2_ADDR) begin
-    if (&scpu_cache_addr[3:0]) begin
-      cache_flags[scpu_cache_addr[8:4]] <= 1'b1;
-    end
-  end
 end
 
 always @(posedge clkin) begin
@@ -646,10 +646,11 @@ always @(posedge clkin) begin
 end
 
 /*
+// For some reason, enabling this makes timing constraints start to fail!?
 always @(posedge clkin) begin
   casex (ADDR[9:0])
     // Cache RAM
-    10'h1xx, 10'h2xx: CACHE_DOr = cache[RESOLVED_CACHE_ADDR];
+    10'h1xx, 10'h2xx: CACHE_DOr <= cache_outb;
   endcase
 end
 */
@@ -665,10 +666,14 @@ initial ROMBUSRD_STATE = ST_ROMBUSRD_IDLE;
 reg cpu_rom_bus_rq2;
 always @(posedge clkin) cpu_rom_bus_rq2 <= cpu_rom_bus_rq;
 
+/* This is just CACHE_ROM_BUS_RRQr delayed by one cycle. */
+reg cache_rom_bus_rq2;
+always @(posedge clkin) cache_rom_bus_rq2 <= CACHE_ROM_BUS_RRQr;
+
 always @(posedge clkin) begin
   case(ROMBUSRD_STATE)
     ST_ROMBUSRD_IDLE: begin
-      if(cpu_rom_bus_rq2) begin
+      if(cpu_rom_bus_rq2 | cache_rom_bus_rq2) begin
         ROMBUSRD_STATE <= ST_ROMBUSRD_WAIT;
       end
     end
