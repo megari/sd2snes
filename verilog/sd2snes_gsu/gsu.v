@@ -45,9 +45,11 @@ assign DO = mmio_enable ? MMIO_DO
             : cache_enable ? CACHE_DO
             : 8'h00;
 
-reg [15:0] regs [0:13]; // General purpose registers R0~R13
-reg [15:0] rap;         // Game Pak ROM address pointer: R14
-reg [15:0] pc;          // Program counter: R15
+reg [15:0] regs [0:15]; // General purpose registers R0~R15
+parameter
+	RAP = 4'd14,
+	PC  = 4'd15
+;
 
 // Status/flag register flags
 reg [15:0] sfr;
@@ -103,7 +105,7 @@ reg [16:0] res17;
 reg [7:0] cache [511:0];
 reg [31:0] cache_flags;
 wire [8:0] RESOLVED_CACHE_ADDR = (ADDR[9:0] + cbr) & 9'h1ff;
-wire [8:0] RESOLVED_CACHE_PC = (pc[9:0] + cbr) & 9'h1ff;
+wire [8:0] RESOLVED_CACHE_PC = (regs[PC][9:0] + cbr) & 9'h1ff;
 
 /* Byte in cache pointed to by the program counter */
 reg [7:0] cache_byte;
@@ -113,7 +115,6 @@ end
 
 /* Immediate part of current instruction */
 wire [3:0] imm = cache_byte[3:0];
-wire [15:0] reg_imm = regs[imm];
 
 /* For plotting, two pixel caches. */
 reg[7:0] primary_pcache [7:0];
@@ -141,6 +142,7 @@ parameter OP_NOP  = 8'b00000001;
 
 initial begin: initial_blk
 	state = STATE_IDLE;
+	regs[PC] = 16'h0000;
 end
 
 always @(posedge clkin) begin
@@ -164,33 +166,18 @@ always @(posedge clkin) begin
 	STATE_IDLE: begin
 		if (MMIO_WR_EN) begin
 			casex (ADDR[9:0])
+				/* GPRs R0~R15 */
 				10'b00000xxxxx: begin
-					if (ADDR[4:1] < 4'd14) begin
-						if (!ADDR[0]) begin
-							regs[ADDR[4:1]][7:0] <= DI;
-						end
-						else begin
-							regs[ADDR[4:1]][15:8] <= DI;
-						end
-					end
-					else if (ADDR[4:1] == 4'd14) begin
-						if (!ADDR[0]) begin
-							rap[7:0] <= DI;
-						end
-						else begin
-							rap[15:8] <= DI;
-						end
+					regs[ADDR[4:1]] <= ADDR[0]
+					                   ? {DI, regs[ADDR[4:1]][7:0]}
+					                   : {regs[ADDR[4:1]][15:8], DI};
+
+					if (ADDR[4:1] == RAP) begin
 						// TODO: should update ROM buffer
 					end
-					else begin
-						if (!ADDR[0]) begin
-							pc[7:0] <= DI;
-						end
-						else begin
-							pc[15:8] <= DI;
-							sfr[G] <= 1'b1;
-							state <= STATE_FETCH1;
-						end
+					else if (ADDR[4:0] == {PC, 1'b1}) begin
+						sfr[G] <= 1'b1;
+						state <= STATE_FETCH1;
 					end
 				end
 
@@ -252,19 +239,19 @@ always @(posedge clkin) begin
 				sfr[ALT1] <= 1'b1;
 				sfr[ALT2] <= 1'b0;
 				state <= STATE_FETCH2;
-				pc <= pc + 1;
+				regs[PC] <= regs[PC] + 1;
 			end
 			OP_ALT2: begin
 				sfr[ALT1] <= 1'b0;
 				sfr[ALT2] <= 1'b1;
 				state <= STATE_FETCH2;
-				pc <= pc + 1;
+				regs[PC] <= regs[PC] + 1;
 			end
 			OP_ALT3: begin
 				sfr[ALT1] <= 1'b1;
 				sfr[ALT2] <= 1'b1;
 				state <= STATE_FETCH2;
-				pc <= pc + 1;
+				regs[PC] <= regs[PC] + 1;
 			end
 			default: state <= STATE_EXEC;
 		endcase
@@ -307,12 +294,12 @@ always @(posedge clkin) begin
 			begin: op_beq_blk
 				reg signed [7:0] tmp;
 				tmp = pipeline;
-				pc <= pc + 1'b1;
+				regs[PC] <= regs[PC] + 1'b1;
 				//pipeline = 8'b1; // XXX: NOP for now. Should read.
 				//fetch_next_cached_insn;
 				if (z) begin
 					// XXX this is ugly!
-					pc <= $unsigned($signed(pc) + tmp);
+					regs[PC] <= $unsigned($signed(regs[PC]) + tmp);
 				end
 			end
 			*/
@@ -331,8 +318,10 @@ always @(posedge clkin) begin
 				sfr[Z]  <= (res17 & 16'hffff) == 0;
 
 				// Set result
-				// XXX: what if dst_reg > 13?
 				regs[dst_reg] <= res17;
+				if (dst_reg != PC) begin
+					regs[PC] <= regs[PC] + 1;
+				end
 
 				// Register reset
 				sfr[B]    <= 1'b0;
@@ -341,47 +330,19 @@ always @(posedge clkin) begin
 				src_reg  <= 4'h0;
 				dst_reg  <= 4'h0;
 			end
+			default: regs[PC] <= regs[PC] + 1;
 		endcase
-		pc <= pc + 1;
 		state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
 	end
 	endcase
 end
 
+/* MMIO read process */
 always @(posedge clkin) begin
 	casex (ADDR[9:0])
-		10'h000: MMIO_DOr <= regs[0][7:0];
-		10'h001: MMIO_DOr <= regs[0][15:8];
-		10'h002: MMIO_DOr <= regs[1][7:0];
-		10'h003: MMIO_DOr <= regs[1][15:8];
-		10'h004: MMIO_DOr <= regs[2][7:0];
-		10'h005: MMIO_DOr <= regs[2][15:8];
-		10'h006: MMIO_DOr <= regs[3][7:0];
-		10'h007: MMIO_DOr <= regs[3][15:8];
-		10'h008: MMIO_DOr <= regs[4][7:0];
-		10'h009: MMIO_DOr <= regs[4][15:8];
-		10'h00a: MMIO_DOr <= regs[5][7:0];
-		10'h00b: MMIO_DOr <= regs[5][15:8];
-		10'h00c: MMIO_DOr <= regs[6][7:0];
-		10'h00d: MMIO_DOr <= regs[6][15:8];
-		10'h00e: MMIO_DOr <= regs[7][7:0];
-		10'h00f: MMIO_DOr <= regs[7][15:8];
-		10'h010: MMIO_DOr <= regs[8][7:0];
-		10'h011: MMIO_DOr <= regs[8][15:8];
-		10'h012: MMIO_DOr <= regs[9][7:0];
-		10'h013: MMIO_DOr <= regs[9][15:8];
-		10'h014: MMIO_DOr <= regs[10][7:0];
-		10'h015: MMIO_DOr <= regs[10][15:8];
-		10'h016: MMIO_DOr <= regs[11][7:0];
-		10'h017: MMIO_DOr <= regs[11][15:8];
-		10'h018: MMIO_DOr <= regs[12][7:0];
-		10'h019: MMIO_DOr <= regs[12][15:8];
-		10'h01a: MMIO_DOr <= regs[13][7:0];
-		10'h01b: MMIO_DOr <= regs[13][15:8];
-		10'h01c: MMIO_DOr <= rap[7:0];
-		10'h01d: MMIO_DOr <= rap[15:8];
-		10'h01e: MMIO_DOr <= pc[7:0];
-		10'h01f: MMIO_DOr <= pc[15:8];
+		/* GPRs R0~R15 */
+		10'b00000xxxx0: MMIO_DOr <= regs[ADDR[4:1]][7:0];
+		10'b00000xxxx1: MMIO_DOr <= regs[ADDR[4:1]][15:8];
 
 		// Status flag register
 		10'h030: MMIO_DOr <= sfr[7:0];
