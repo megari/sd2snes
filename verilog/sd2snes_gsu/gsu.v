@@ -19,14 +19,14 @@
 //
 //////////////////////////////////////////////////////////////////////////////////
 module gsu(
-	input clkin,
-	input [7:0] DI,
-	output [7:0] DO,
-	input [23:0] ADDR,
-	input CS,
-	input reg_we_rising,
-	output ron,
-	output ran
+  input clkin,
+  input [7:0] DI,
+  output [7:0] DO,
+  input [23:0] ADDR,
+  input CS,
+  input reg_we_rising,
+  output ron,
+  output ran
 );
 
 wire mmio_enable = CS & !ADDR[22] & (ADDR[15:12] == 4'b0011) & (ADDR[15:0] < 16'h3040);
@@ -49,8 +49,8 @@ assign DO = mmio_enable ? MMIO_DO
 
 reg [15:0] regs [0:15]; // General purpose registers R0~R15
 parameter
-	RAP = 4'd14,
-	PC  = 4'd15
+  RAP = 4'd14,
+  PC  = 4'd15
 ;
 
 // Status/flag register flags
@@ -68,18 +68,18 @@ wire ih = sfr[11];  // Immediate higher
 wire b = sfr[12];   // Instruction executed with WITH
 wire irq = sfr[15]; // Interrupt
 parameter
-	Z    = 4'd1,
-	CY   = 4'd2,
-	S    = 4'd3,
-	OV   = 4'd4,
-	G    = 4'd5,
-	R    = 4'd6,
-	ALT1 = 4'd8,
-	ALT2 = 4'd9,
-	IL   = 4'd10,
-	IH   = 4'd11,
-	B    = 4'd12,
-	IRQ  = 4'd15
+  Z    = 4'd1,
+  CY   = 4'd2,
+  S    = 4'd3,
+  OV   = 4'd4,
+  G    = 4'd5,
+  R    = 4'd6,
+  ALT1 = 4'd8,
+  ALT2 = 4'd9,
+  IL   = 4'd10,
+  IH   = 4'd11,
+  B    = 4'd12,
+  IRQ  = 4'd15
 ;
 
 reg [7:0] pbr;   // Program bank register
@@ -116,7 +116,7 @@ wire [8:0] RESOLVED_CACHE_PC = (regs[PC][9:0] + cbr) & 9'h1ff;
 /* Byte in cache pointed to by the program counter */
 reg [7:0] cache_byte;
 always @(posedge clkin) begin
-	cache_byte = cache[RESOLVED_CACHE_PC];
+  cache_byte = cache[RESOLVED_CACHE_PC];
 end
 
 /* Immediate part of current instruction */
@@ -147,260 +147,260 @@ parameter OP_BEQ  = 8'b00001001;
 parameter OP_NOP  = 8'b00000001;
 
 initial begin: initial_blk
-	state = STATE_IDLE;
-	regs[PC] = 16'h0000;
+  state = STATE_IDLE;
+  regs[PC] = 16'h0000;
 end
 
 always @(posedge clkin) begin
-	if (CACHE_WR_EN) begin
-		casex (ADDR[9:0])
-			// Cache RAM
-			// XXX: this probably won't do as the cache can
-			//      also be written to by internal processes
-			10'h1xx, 10'h2xx: begin
-				cache[RESOLVED_CACHE_ADDR] = DI;
-				if (ADDR[0]) begin
-					cache_flags[RESOLVED_CACHE_ADDR[8:4]] = 1'b1;
-				end
-			end
-		endcase
-	end
+  if (CACHE_WR_EN) begin
+    casex (ADDR[9:0])
+      // Cache RAM
+      // XXX: this probably won't do as the cache can
+      //      also be written to by internal processes
+      10'h1xx, 10'h2xx: begin
+        cache[RESOLVED_CACHE_ADDR] = DI;
+        if (ADDR[0]) begin
+          cache_flags[RESOLVED_CACHE_ADDR[8:4]] = 1'b1;
+        end
+      end
+    endcase
+  end
 end
 
 always @(posedge clkin) begin
-	case (state)
-	STATE_IDLE: begin
-		if (MMIO_WR_EN) begin
-			casex (ADDR[9:0])
-				/* GPRs R0~R15 */
-				10'b00000xxxxx: begin
-					regs[ADDR[4:1]] <= ADDR[0]
-					                   ? {DI, regs[ADDR[4:1]][7:0]}
-					                   : {regs[ADDR[4:1]][15:8], DI};
+  case (state)
+    STATE_IDLE: begin
+      if (MMIO_WR_EN) begin
+        casex (ADDR[9:0])
+          /* GPRs R0~R15 */
+          10'b00000xxxxx: begin
+            regs[ADDR[4:1]] <= ADDR[0]
+                               ? {DI, regs[ADDR[4:1]][7:0]}
+                               : {regs[ADDR[4:1]][15:8], DI};
 
-					if (ADDR[4:1] == RAP) begin
-						// TODO: should update ROM buffer
-					end
-					else if (ADDR[4:0] == {PC, 1'b1}) begin
-						sfr[G] <= 1'b1;
-						state <= STATE_FETCH1;
-					end
-				end
+            if (ADDR[4:1] == RAP) begin
+              // TODO: should update ROM buffer
+            end
+            else if (ADDR[4:0] == {PC, 1'b1}) begin
+              sfr[G] <= 1'b1;
+              state <= STATE_FETCH1;
+            end
+          end
 
-				// Status flag register
-				10'h030: begin
-					sfr[7:0] <= {1'b0, DI[6:1], 1'b0};
-					if (DI[G]) begin
-						state <= STATE_FETCH1;
-					end
-				end
-				10'h031: sfr[15:8] <= {DI[7], 2'b00, DI[4:0]};
+          // Status flag register
+          10'h030: begin
+            sfr[7:0] <= {1'b0, DI[6:1], 1'b0};
+            if (DI[G]) begin
+              state <= STATE_FETCH1;
+            end
+          end
+          10'h031: sfr[15:8] <= {DI[7], 2'b00, DI[4:0]};
 
-				//10'h032: Unused
+          //10'h032: Unused
 
-				// Back-up RAM register
-				10'h033: bramr <= DI[0];
+          // Back-up RAM register
+          10'h033: bramr <= DI[0];
 
-				// Program bank register
-				10'h034: pbr <= DI;
+          // Program bank register
+          10'h034: pbr <= DI;
 
-				// Game Pak ROM bank register: read only
-				//10'h036: rombr <= DI;
+          // Game Pak ROM bank register: read only
+          //10'h036: rombr <= DI;
 
-				// Config register:
-				10'h037: cfgr <= {DI[7], 1'b0, DI[5], 5'b00000};
+          // Config register:
+          10'h037: cfgr <= {DI[7], 1'b0, DI[5], 5'b00000};
 
-				// Screen base register
-				10'h038: scbr <= DI;
+          // Screen base register
+          10'h038: scbr <= DI;
 
-				// Clock select register
-				10'h039: clsr <= DI[0];
+          // Clock select register
+          10'h039: clsr <= DI[0];
 
-				// Screen mode register
-				10'h03a: scmr <= DI[5:0];
+          // Screen mode register
+          10'h03a: scmr <= DI[5:0];
 
-				// Version code register: read only
-				//10'h03b: vcr <= DI;
+          // Version code register: read only
+          //10'h03b: vcr <= DI;
 
-				// Game Pak RAM bank register: read only
-				//10'h03c: rambr <= DI[0];
+          // Game Pak RAM bank register: read only
+          //10'h03c: rambr <= DI[0];
 
-				//10'h03d: Unused
+          //10'h03d: Unused
 
-				// Cache base register: read only
-				//10'h03e: cbr[7:0] <= {DI[7:4], 4'b0000};
-				//10'h03f: cbr[15:8] <= DI;
+          // Cache base register: read only
+          //10'h03e: cbr[7:0] <= {DI[7:4], 4'b0000};
+          //10'h03f: cbr[15:8] <= DI;
 
-				// Color register: no access from SNES CPU
-				// Plot option register: no access from SNES CPU
+          // Color register: no access from SNES CPU
+          // Plot option register: no access from SNES CPU
 
-			endcase
-		end
-	end
-	STATE_FETCH1: begin
-		//if (FETCH1_DONE)
-		// First, read first byte of instruction from cache
-		case (cache_byte)
-			OP_ALT1: begin
-				sfr[ALT1] <= 1'b1;
-				sfr[ALT2] <= 1'b0;
-				state <= STATE_FETCH2;
-				regs[PC] <= regs[PC] + 1;
-			end
-			OP_ALT2: begin
-				sfr[ALT1] <= 1'b0;
-				sfr[ALT2] <= 1'b1;
-				state <= STATE_FETCH2;
-				regs[PC] <= regs[PC] + 1;
-			end
-			OP_ALT3: begin
-				sfr[ALT1] <= 1'b1;
-				sfr[ALT2] <= 1'b1;
-				state <= STATE_FETCH2;
-				regs[PC] <= regs[PC] + 1;
-			end
-			default: state <= STATE_EXEC;
-		endcase
-	end
-	STATE_FETCH2: begin
-		// Read second byte of instruction from cache
-		// XXX: are we supposed to do something here?
-		state <= STATE_EXEC;
-	end
-	STATE_EXEC: begin
-		casex (cache_byte)
-			OP_NOP:	begin
-				// Just reset regs.
-				sfr[B] <= 1'b0;
-				sfr[ALT1] <= 1'b0;
-				sfr[ALT2] <= 1'b0;
-				src_reg <= 4'h0;
-				dst_reg <= 4'h0;
-			end
-			OP_ADX: begin
-				if (!alt1 && !alt2) begin
-					// ADD Rn
-					res17 <= regs[src_reg] + regs[imm];
-				end
-				else if (alt1 && !alt2) begin
-					// ADC Rn
-					res17 <= regs[src_reg] + regs[imm] + cy;
-				end
-				else if (!alt1 && alt2) begin
-					// ADD #n
-					res17 <= regs[src_reg] + imm;
-				end
-				else /* if (alt1 && alt2) */ begin
-					// ADC #n
-					res17 <= regs[src_reg] + imm + cy;
-				end
-			end
-			/*
-			OP_BEQ:
-			begin: op_beq_blk
-				reg signed [7:0] tmp;
-				tmp = pipeline;
-				regs[PC] <= regs[PC] + 1'b1;
-				//pipeline = 8'b1; // XXX: NOP for now. Should read.
-				//fetch_next_cached_insn;
-				if (z) begin
-					// XXX this is ugly!
-					regs[PC] <= $unsigned($signed(regs[PC]) + tmp);
-				end
-			end
-			*/
-		endcase
-		state <= STATE_WBACK;
-	end
-	STATE_WBACK: begin
-		casex (cache_byte)
-			OP_ADX: begin
-				// Set flags
-				sfr[OV] <= (~(regs[src_reg] ^ (alt2 ? regs[imm] : imm))
-							& ((alt2 ? regs[imm] : imm) ^ res17)
-							& 16'h8000) != 0;
-				sfr[S]  <= (res17 & 16'h8000) != 0;
-				sfr[CY] <= res17 >= 17'h10000;
-				sfr[Z]  <= (res17 & 16'hffff) == 0;
+        endcase
+      end
+    end
+    STATE_FETCH1: begin
+      //if (FETCH1_DONE)
+      // First, read first byte of instruction from cache
+      case (cache_byte)
+        OP_ALT1: begin
+          sfr[ALT1] <= 1'b1;
+          sfr[ALT2] <= 1'b0;
+          state <= STATE_FETCH2;
+          regs[PC] <= regs[PC] + 1;
+        end
+        OP_ALT2: begin
+          sfr[ALT1] <= 1'b0;
+          sfr[ALT2] <= 1'b1;
+          state <= STATE_FETCH2;
+          regs[PC] <= regs[PC] + 1;
+        end
+        OP_ALT3: begin
+          sfr[ALT1] <= 1'b1;
+          sfr[ALT2] <= 1'b1;
+          state <= STATE_FETCH2;
+          regs[PC] <= regs[PC] + 1;
+        end
+        default: state <= STATE_EXEC;
+      endcase
+    end
+    STATE_FETCH2: begin
+      // Read second byte of instruction from cache
+      // XXX: are we supposed to do something here?
+      state <= STATE_EXEC;
+    end
+    STATE_EXEC: begin
+      casex (cache_byte)
+        OP_NOP:  begin
+          // Just reset regs.
+          sfr[B] <= 1'b0;
+          sfr[ALT1] <= 1'b0;
+          sfr[ALT2] <= 1'b0;
+          src_reg <= 4'h0;
+          dst_reg <= 4'h0;
+        end
+        OP_ADX: begin
+          if (!alt1 && !alt2) begin
+            // ADD Rn
+            res17 <= regs[src_reg] + regs[imm];
+          end
+          else if (alt1 && !alt2) begin
+            // ADC Rn
+            res17 <= regs[src_reg] + regs[imm] + cy;
+          end
+          else if (!alt1 && alt2) begin
+            // ADD #n
+            res17 <= regs[src_reg] + imm;
+          end
+          else /* if (alt1 && alt2) */ begin
+            // ADC #n
+            res17 <= regs[src_reg] + imm + cy;
+          end
+        end
+        /*
+        OP_BEQ:
+        begin: op_beq_blk
+          reg signed [7:0] tmp;
+          tmp = pipeline;
+          regs[PC] <= regs[PC] + 1'b1;
+          //pipeline = 8'b1; // XXX: NOP for now. Should read.
+          //fetch_next_cached_insn;
+          if (z) begin
+            // XXX this is ugly!
+            regs[PC] <= $unsigned($signed(regs[PC]) + tmp);
+          end
+        end
+        */
+      endcase
+      state <= STATE_WBACK;
+    end
+    STATE_WBACK: begin
+      casex (cache_byte)
+        OP_ADX: begin
+          // Set flags
+          sfr[OV] <= (~(regs[src_reg] ^ (alt2 ? regs[imm] : imm))
+                & ((alt2 ? regs[imm] : imm) ^ res17)
+                & 16'h8000) != 0;
+          sfr[S]  <= (res17 & 16'h8000) != 0;
+          sfr[CY] <= res17 >= 17'h10000;
+          sfr[Z]  <= (res17 & 16'hffff) == 0;
 
-				// Set result
-				regs[dst_reg] <= res17;
-				if (dst_reg != PC) begin
-					regs[PC] <= regs[PC] + 1;
-				end
+          // Set result
+          regs[dst_reg] <= res17;
+          if (dst_reg != PC) begin
+            regs[PC] <= regs[PC] + 1;
+          end
 
-				// Register reset
-				sfr[B]    <= 1'b0;
-				sfr[ALT1] <= 1'b0;
-				sfr[ALT2] <= 1'b0;
-				src_reg  <= 4'h0;
-				dst_reg  <= 4'h0;
-			end
-			default: regs[PC] <= regs[PC] + 1;
-		endcase
-		state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
-	end
-	endcase
+          // Register reset
+          sfr[B]    <= 1'b0;
+          sfr[ALT1] <= 1'b0;
+          sfr[ALT2] <= 1'b0;
+          src_reg  <= 4'h0;
+          dst_reg  <= 4'h0;
+        end
+        default: regs[PC] <= regs[PC] + 1;
+      endcase
+      state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
+    end
+  endcase
 end
 
 /* MMIO read process */
 always @(posedge clkin) begin
-	casex (ADDR[9:0])
-		/* GPRs R0~R15 */
-		10'b00000xxxx0: MMIO_DOr <= regs[ADDR[4:1]][7:0];
-		10'b00000xxxx1: MMIO_DOr <= regs[ADDR[4:1]][15:8];
+  casex (ADDR[9:0])
+    /* GPRs R0~R15 */
+    10'b00000xxxx0: MMIO_DOr <= regs[ADDR[4:1]][7:0];
+    10'b00000xxxx1: MMIO_DOr <= regs[ADDR[4:1]][15:8];
 
-		// Status flag register
-		10'h030: MMIO_DOr <= sfr[7:0];
-		10'h031: MMIO_DOr <= sfr[15:8]; // TODO: should reset IRQ flag
+    // Status flag register
+    10'h030: MMIO_DOr <= sfr[7:0];
+    10'h031: MMIO_DOr <= sfr[15:8]; // TODO: should reset IRQ flag
 
-		//10'h032: Unused
+    //10'h032: Unused
 
-		// Back-up RAM register: write only
-		//10'h033: MMIO_DOr <= {7'b0000000, bramr};
+    // Back-up RAM register: write only
+    //10'h033: MMIO_DOr <= {7'b0000000, bramr};
 
-		// Program bank register
-		10'h034: MMIO_DOr <= pbr;
+    // Program bank register
+    10'h034: MMIO_DOr <= pbr;
 
-		// Game Pak ROM bank register
-		10'h036: MMIO_DOr <= rombr;
+    // Game Pak ROM bank register
+    10'h036: MMIO_DOr <= rombr;
 
-		// Config register: write only
-		//10'h037: MMIO_DOr <= cfgr;
+    // Config register: write only
+    //10'h037: MMIO_DOr <= cfgr;
 
-		// Screen base register: write only
-		//10'h038: MMIO_DOr <= scbr;
+    // Screen base register: write only
+    //10'h038: MMIO_DOr <= scbr;
 
-		// Clock select register: write only
-		//10'h039: MMIO_DOr <= {7'b0000000, clsr};
+    // Clock select register: write only
+    //10'h039: MMIO_DOr <= {7'b0000000, clsr};
 
-		// Screen mode register: write only
-		//10'h03a: MMIO_DOr <= {2'b00, scmr};
+    // Screen mode register: write only
+    //10'h03a: MMIO_DOr <= {2'b00, scmr};
 
-		// Version code register
-		10'h03b: MMIO_DOr <= vcr;
+    // Version code register
+    10'h03b: MMIO_DOr <= vcr;
 
-		// Game Pak RAM bank register
-		10'h03c: MMIO_DOr <= {7'b0000000, rambr};
+    // Game Pak RAM bank register
+    10'h03c: MMIO_DOr <= {7'b0000000, rambr};
 
-		//10'h03d: Unused
+    //10'h03d: Unused
 
-		// Cache base register
-		10'h03e: MMIO_DOr <= {cbr[7:4], 4'b0000};
-		10'h03f: MMIO_DOr <= cbr[15:8];
+    // Cache base register
+    10'h03e: MMIO_DOr <= {cbr[7:4], 4'b0000};
+    10'h03f: MMIO_DOr <= cbr[15:8];
 
-		// Color register: no access from SNES CPU
-		// Plot option register: no access from SNES CPU
+    // Color register: no access from SNES CPU
+    // Plot option register: no access from SNES CPU
 
-		default: MMIO_DOr <= 8'hff;
-	endcase
+    default: MMIO_DOr <= 8'hff;
+  endcase
 end
 
 always @(posedge clkin) begin
-	casex (ADDR[9:0])
-		// Cache RAM
-		10'h1xx, 10'h2xx: CACHE_DOr = cache[RESOLVED_CACHE_ADDR];
-	endcase
+  casex (ADDR[9:0])
+    // Cache RAM
+    10'h1xx, 10'h2xx: CACHE_DOr = cache[RESOLVED_CACHE_ADDR];
+  endcase
 end
 
 endmodule
