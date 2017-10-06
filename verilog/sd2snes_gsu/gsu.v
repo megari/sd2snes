@@ -27,64 +27,30 @@ module gsu(
 	input reg_we_rising
 );
 
-reg [2:0] clk_counter;
-reg clk;
-
-wire mmio_enable = CS & !ADDR[22] & (ADDR[15:12] == 4'b0011) & (ADDR[15:0] < 16'h3300);
+wire mmio_enable = CS & !ADDR[22] & (ADDR[15:12] == 4'b0011) & (ADDR[15:0] < 16'h3040);
 wire MMIO_WR_EN = mmio_enable & reg_we_rising;
 
 reg  [7:0] MMIO_DOr;
 wire [7:0] MMIO_DO;
 assign MMIO_DO = MMIO_DOr;
 
+wire cache_enable = CS & !ADDR[22] & (ADDR[15:12] == 4'b0011) & (ADDR[9] ^ ADDR[8]) & (ADDR[15:0] < 16'h3300);
+wire CACHE_WR_EN = cache_enable & reg_we_rising;
+
+reg  [7:0] CACHE_DOr;
+wire [7:0] CACHE_DO;
+assign CACHE_DO = CACHE_DOr;
+
 assign DO = mmio_enable ? MMIO_DO
+            : cache_enable ? CACHE_DO
             : 8'h00;
 
 reg [15:0] regs [0:13]; // General purpose registers R0~R13
-reg [15:0] regs_int [0:13];
-reg [15:0] regs_mmio [0:13];
-always @(MMIO_WR_EN,
-         regs_mmio[0], regs_mmio[1], regs_mmio[2], regs_mmio[3], regs_mmio[4], regs_mmio[5],
-         regs_mmio[6], regs_mmio[7], regs_mmio[8], regs_mmio[9], regs_mmio[10], regs_mmio[11],
-         regs_mmio[12], regs_mmio[13],
-         regs_int[0], regs_int[1], regs_int[2], regs_int[3], regs_int[4], regs_int[5],
-         regs_int[6], regs_int[7], regs_int[8], regs_int[9], regs_int[10], regs_int[11],
-         regs_int[12], regs_int[13]) begin
-	regs[0] <= MMIO_WR_EN ? regs_mmio[0] : regs_int[0];
-	regs[1] <= MMIO_WR_EN ? regs_mmio[1] : regs_int[1];
-	regs[2] <= MMIO_WR_EN ? regs_mmio[2] : regs_int[2];
-	regs[3] <= MMIO_WR_EN ? regs_mmio[3] : regs_int[3];
-	regs[4] <= MMIO_WR_EN ? regs_mmio[4] : regs_int[4];
-	regs[5] <= MMIO_WR_EN ? regs_mmio[5] : regs_int[5];
-	regs[6] <= MMIO_WR_EN ? regs_mmio[6] : regs_int[6];
-	regs[7] <= MMIO_WR_EN ? regs_mmio[7] : regs_int[7];
-	regs[8] <= MMIO_WR_EN ? regs_mmio[8] : regs_int[8];
-	regs[9] <= MMIO_WR_EN ? regs_mmio[9] : regs_int[9];
-	regs[10] <= MMIO_WR_EN ? regs_mmio[10] : regs_int[10];
-	regs[11] <= MMIO_WR_EN ? regs_mmio[11] : regs_int[11];
-	regs[12] <= MMIO_WR_EN ? regs_mmio[12] : regs_int[12];
-	regs[13] <= MMIO_WR_EN ? regs_mmio[13] : regs_int[13];
-end
 reg [15:0] rap;         // Game Pak ROM address pointer: R14
-reg [15:0] rap_int;
-reg [15:0] rap_mmio;
-always @(MMIO_WR_EN, rap_mmio, rap_int) begin
-	rap <= MMIO_WR_EN ? rap_mmio : rap_int;
-end
 reg [15:0] pc;          // Program counter: R15
-reg [15:0] pc_int;
-reg [15:0] pc_mmio;
-always @(MMIO_WR_EN, pc_mmio, pc_int) begin
-	pc <= MMIO_WR_EN ? pc_mmio : pc_int;
-end
 
 // Status/flag register flags
 reg [15:0] sfr;
-reg [15:0] sfr_int;
-reg [15:0] sfr_mmio;
-always @(MMIO_WR_EN, sfr_mmio, sfr_int) begin
-	sfr <= MMIO_WR_EN ? sfr_mmio : sfr_int;
-end
 wire z = sfr[1];    // Zero
 wire cy = sfr[2];   // Carry
 wire s = sfr[3];    // Sign
@@ -98,81 +64,56 @@ wire ih = sfr[11];  // Immediate higher
 wire b = sfr[12];   // Instruction executed with WITH
 wire irq = sfr[15]; // Interrupt
 parameter
-	Z    =  1,
-	CY   =  2,
-	S    =  3,
-	OV   =  4,
-	G    =  5,
-	R    =  6,
-	ALT1 =  8,
-	ALT2 =  9,
-	IL   = 10,
-	IH   = 11,
-	B    = 12,
-	IRQ  = 15
+	Z    = 4'd1,
+	CY   = 4'd2,
+	S    = 4'd3,
+	OV   = 4'd4,
+	G    = 4'd5,
+	R    = 4'd6,
+	ALT1 = 4'd8,
+	ALT2 = 4'd9,
+	IL   = 4'd10,
+	IH   = 4'd11,
+	B    = 4'd12,
+	IRQ  = 4'd15
 ;
 
 reg [7:0] pbr;   // Program bank register
-reg [7:0] pbr_int;
-reg [7:0] pbr_mmio;
-always @(MMIO_WR_EN, pbr_mmio, pbr_int) begin
-	pbr <= MMIO_WR_EN ? pbr_mmio : pbr_int;
-end
 reg [7:0] rombr; // Game Pak ROM bank register
 reg rambr;       // Game Pak RAM bank register
 reg [15:0] cbr;  // Cache base register. [3:0] are always 0.
                  // TODO: why not make the register only 12 bits wide?
 reg [7:0] scbr;  // Screen base register
-reg [7:0] scbr_int;
-reg [7:0] scbr_mmio;
-always @(MMIO_WR_EN, scbr_mmio, scbr_int) begin
-	scbr <= MMIO_WR_EN ? scbr_mmio : scbr_int;
-end
 reg [5:0] scmr;  // Screen mode register
-reg [5:0] scmr_int;
-reg [5:0] scmr_mmio;
-always @(MMIO_WR_EN, scmr_mmio, scmr_int) begin
-	scmr <= MMIO_WR_EN ? scmr_mmio : scmr_int;
-end
 reg [7:0] colr;  // Color register
 reg [4:0] por;   // Plot option register
 reg bramr;       // Back-up RAM register
-reg bramr_int;
-reg bramr_mmio;
-always @(MMIO_WR_EN, bramr_mmio, bramr_int) begin
-	bramr <= MMIO_WR_EN ? bramr_mmio : bramr_int;
-end
-
 reg [7:0] vcr;   // Version code register
 reg [7:0] cfgr;  // Config register
-reg [7:0] cfgr_int;
-reg [7:0] cfgr_mmio;
-always @(MMIO_WR_EN, cfgr_mmio, cfgr_int) begin
-	cfgr <= MMIO_WR_EN ? cfgr_mmio : cfgr_int;
-end
 reg clsr;        // Clock select register
-reg clsr_int;
-reg clsr_mmio;
-always @(MMIO_WR_EN, clsr_mmio, clsr_int) begin
-	clsr <= MMIO_WR_EN ? clsr_mmio : clsr_int;
-end
 
-reg [7:0] curr_insn [0:2];
-reg [1:0] insn_idx;
-reg [1:0] fetches_left;
 reg [7:0] pipeline;
 
-reg [3:0] imm;
 reg [3:0] src_reg;
 reg [3:0] dst_reg;
+
+reg [16:0] res17;
 
 /* Cache RAM and cache flags */
 reg [7:0] cache [511:0];
 reg [31:0] cache_flags;
+wire [8:0] RESOLVED_CACHE_ADDR = (ADDR[9:0] + cbr) & 9'h1ff;
+wire [8:0] RESOLVED_CACHE_PC = (pc[9:0] + cbr) & 9'h1ff;
 
-/* XXX: old, useless cache stuff. Remove ASAP! */
-reg [8:0] cache_addra;
-wire [7:0] cache_douta;
+/* Byte in cache pointed to by the program counter */
+reg [7:0] cache_byte;
+always @(posedge clkin) begin
+	cache_byte = cache[RESOLVED_CACHE_PC];
+end
+
+/* Immediate part of current instruction */
+wire [3:0] imm = cache_byte[3:0];
+wire [15:0] reg_imm = regs[imm];
 
 /* For plotting, two pixel caches. */
 reg[7:0] primary_pcache [7:0];
@@ -182,176 +123,229 @@ reg[7:0] secondary_pcache_flags;
 
 reg fetch_cached_insn;
 
-reg[0:0] state;
-/*
-parameter STATE_FETCHNLOAD = 2'b01;
-parameter STATE_EXEC       = 2'b10;
-*/
-parameter STATE_BEGIN = 1'b0;
-parameter STATE_FETCH = 1'b1; // This is somewhat misleadingly named.
+reg[5:0] state;
+parameter STATE_IDLE    = 8'b00000001;
+//parameter STATE_ROMWAIT = 8'b00000010;
+//parameter STATE_RAMWAIT = 8'b00000100;
+parameter STATE_FETCH1  = 8'b00010000;
+parameter STATE_FETCH2  = 8'b00100000;
+parameter STATE_EXEC    = 8'b01000000;
+parameter STATE_WBACK   = 8'b10000000;
 
 parameter OP_ALT1 = 8'b00111101;
 parameter OP_ALT2 = 8'b00111110;
 parameter OP_ALT3 = 8'b00111111;
-parameter OP_ADX  = 8'b0101zzzz;
+parameter OP_ADX  = 8'b0101xxxx;
 parameter OP_BEQ  = 8'b00001001;
 parameter OP_NOP  = 8'b00000001;
 
 initial begin: initial_blk
-	reg[1:0] i;
-	clk = 1'b0;
-	clk_counter = 3'h0;
-	insn_idx = 2'b00;
-
-	for (i = 0; i < 2'h3; i = i+1) begin
-		curr_insn[i] = OP_NOP;
-	end
-	fetches_left = 2'b00;
-	state = STATE_BEGIN;
+	state = STATE_IDLE;
 end
 
 always @(posedge clkin) begin
-	if (clk_counter == 3'h0) begin
-		clk = !clk;
-	end
-	clk_counter = clk_counter + 3'h1;
-
-	// The upper limit depends on the frequency desired.
-	if ((clsr == 1'b0 && clk_counter >= 3'h2) ||
-	    (clsr == 1'b1 && clk_counter == 3'h4)) begin
-		clk_counter = 3'h0;
-	end
-end
-
-always @(posedge clk) begin
-	if (fetch_cached_insn) begin
-		pipeline = cache_douta;
-	end
-end
-
-always @(posedge clk) begin // Should probably use clock in divided by 4 or 8
-
-	// First, copy instruction from cache
-	// TODO: reading from RAM & ROM
-	curr_insn[insn_idx] = cache_douta;
-	fetches_left = fetches_left - 2'b01;
-
-	// If we are beginning a new instruction, determine the number of fetches needed.
-	if (state == STATE_BEGIN) begin
-
-		casez (curr_insn[insn_idx])
-			OP_NOP:
-			begin
-				fetches_left = 2'b00;
-			end
-			OP_ADX:
-			begin
-				if (!alt1 && !alt2) begin
-					// ADD Rn
-					fetches_left = 2'b00;
+	if (CACHE_WR_EN) begin
+		casex (ADDR[9:0])
+			// Cache RAM
+			// XXX: this probably won't do as the cache can
+			//      also be written to by internal processes
+			10'h1xx, 10'h2xx: begin
+				cache[RESOLVED_CACHE_ADDR] = DI;
+				if (ADDR[0]) begin
+					cache_flags[RESOLVED_CACHE_ADDR[8:4]] = 1'b1;
 				end
-				else begin
-					// ADC Rn
-					// ADD #n
-					// ADC #n
-					fetches_left = 2'b01;
-				end
-			end
-			OP_BEQ:
-			begin
-				fetches_left = 2'b01;
 			end
 		endcase
-		state = STATE_FETCH;
 	end
+end
 
-	// Fetch phase. This is always done.
-	if (state == STATE_FETCH) begin
-		// Start fetching next instruction from cache.
-		// It will be ready next cycle.
-		cache_addra = pc - cbr;
+always @(posedge clkin) begin
+	case (state)
+	STATE_IDLE: begin
+		if (MMIO_WR_EN) begin
+			casex (ADDR[9:0])
+				10'b00000xxxxx: begin
+					if (ADDR[4:1] < 4'd14) begin
+						if (!ADDR[0]) begin
+							regs[ADDR[4:1]][7:0] <= DI;
+						end
+						else begin
+							regs[ADDR[4:1]][15:8] <= DI;
+						end
+					end
+					else if (ADDR[4:1] == 4'd14) begin
+						if (!ADDR[0]) begin
+							rap[7:0] <= DI;
+						end
+						else begin
+							rap[15:8] <= DI;
+						end
+						// TODO: should update ROM buffer
+					end
+					else begin
+						if (!ADDR[0]) begin
+							pc[7:0] <= DI;
+						end
+						else begin
+							pc[15:8] <= DI;
+							sfr[G] <= 1'b1;
+							state <= STATE_FETCH1;
+						end
+					end
+				end
+
+				// Status flag register
+				10'h030: begin
+					sfr[7:0] <= {1'b0, DI[6:1], 1'b0};
+					if (DI[G]) begin
+						state <= STATE_FETCH1;
+					end
+				end
+				10'h031: sfr[15:8] <= {DI[7], 2'b00, DI[4:0]};
+
+				//10'h032: Unused
+
+				// Back-up RAM register
+				10'h033: bramr <= DI[0];
+
+				// Program bank register
+				10'h034: pbr <= DI;
+
+				// Game Pak ROM bank register: read only
+				//10'h036: rombr <= DI;
+
+				// Config register:
+				10'h037: cfgr <= {DI[7], 1'b0, DI[5], 5'b00000};
+
+				// Screen base register
+				10'h038: scbr <= DI;
+
+				// Clock select register
+				10'h039: clsr <= DI[0];
+
+				// Screen mode register
+				10'h03a: scmr <= DI[5:0];
+
+				// Version code register: read only
+				//10'h03b: vcr <= DI;
+
+				// Game Pak RAM bank register: read only
+				//10'h03c: rambr <= DI[0];
+
+				//10'h03d: Unused
+
+				// Cache base register: read only
+				//10'h03e: cbr[7:0] <= {DI[7:4], 4'b0000};
+				//10'h03f: cbr[15:8] <= DI;
+
+				// Color register: no access from SNES CPU
+				// Plot option register: no access from SNES CPU
+
+			endcase
+		end
 	end
-
-`define NONE 1
-`ifdef NONE
-	// Exec phase. This is only done once the instruction's been read in full.
-	if (fetches_left == 2'b00) begin
-		//imm = curr_insn[insn_idx][3:0]; // Causes internal error in the compiler!?
-		imm = curr_insn[insn_idx] & 8'h0f;
-
-		casez (curr_insn[0])
-			OP_NOP:
-			begin
+	STATE_FETCH1: begin
+		//if (FETCH1_DONE)
+		// First, read first byte of instruction from cache
+		case (cache_byte)
+			OP_ALT1: begin
+				sfr[ALT1] <= 1'b1;
+				sfr[ALT2] <= 1'b0;
+				state <= STATE_FETCH2;
+				pc <= pc + 1;
+			end
+			OP_ALT2: begin
+				sfr[ALT1] <= 1'b0;
+				sfr[ALT2] <= 1'b1;
+				state <= STATE_FETCH2;
+				pc <= pc + 1;
+			end
+			OP_ALT3: begin
+				sfr[ALT1] <= 1'b1;
+				sfr[ALT2] <= 1'b1;
+				state <= STATE_FETCH2;
+				pc <= pc + 1;
+			end
+			default: state <= STATE_EXEC;
+		endcase
+	end
+	STATE_FETCH2: begin
+		// Read second byte of instruction from cache
+		// XXX: are we supposed to do something here?
+		state <= STATE_EXEC;
+	end
+	STATE_EXEC: begin
+		casex (cache_byte)
+			OP_NOP:	begin
 				// Just reset regs.
-				sfr_int[B] <= 1'b0;
-				sfr_int[ALT1] <= 1'b0;
-				sfr_int[ALT2] <= 1'b0;
+				sfr[B] <= 1'b0;
+				sfr[ALT1] <= 1'b0;
+				sfr[ALT2] <= 1'b0;
 				src_reg <= 3'h0;
 				dst_reg <= 3'h0;
 			end
-`define NONE2 1
-`ifdef NONE2
-			OP_ADX:
-			begin: op_adx_blk
-				reg [16:0] tmp;
-
+			OP_ADX: begin
 				if (!alt1 && !alt2) begin
 					// ADD Rn
-					tmp = regs[src_reg] + regs[imm];
+					res17 <= regs[src_reg] + regs[imm];
 				end
 				else if (alt1 && !alt2) begin
 					// ADC Rn
-					tmp = regs[src_reg] + regs[imm] + cy;
+					res17 <= regs[src_reg] + regs[imm] + cy;
 				end
 				else if (!alt1 && alt2) begin
 					// ADD #n
-					tmp = regs[src_reg] + imm;
+					res17 <= regs[src_reg] + imm;
 				end
 				else /* if (alt1 && alt2) */ begin
 					// ADC #n
-					tmp = regs[src_reg] + imm + cy;
+					res17 <= regs[src_reg] + imm + cy;
 				end
-
-				// Set flags
-				sfr_int[OV] <= (~(regs[src_reg] ^ regs[imm])
-							& (regs[imm] ^ tmp)
-							& 16'h8000) != 0;
-				sfr_int[S]  <= (tmp & 16'h8000) != 0;
-				sfr_int[CY] <= tmp >= 17'h10000;
-				sfr_int[Z]  <= (tmp & 16'hffff) == 0;
-
-				// Set result
-				regs_int[dst_reg] = tmp;
-
-				// Register reset
-				sfr_int[B]    <= 1'b0;
-				sfr_int[ALT1] <= 1'b0;
-				sfr_int[ALT2] <= 1'b0;
-				src_reg  <= 3'h0;
-				dst_reg  <= 3'h0;
 			end
+			/*
 			OP_BEQ:
 			begin: op_beq_blk
 				reg signed [7:0] tmp;
 				tmp = pipeline;
-				pc_int = pc + 1'b1;
+				pc <= pc + 1'b1;
 				//pipeline = 8'b1; // XXX: NOP for now. Should read.
 				//fetch_next_cached_insn;
 				if (z) begin
 					// XXX this is ugly!
-					pc_int = $unsigned($signed(pc) + tmp);
+					pc <= $unsigned($signed(pc) + tmp);
 				end
 			end
-`endif
+			*/
 		endcase
-
-		state = STATE_BEGIN;
-		insn_idx = 2'b00;
 	end
-`endif
-end
+	STATE_WBACK: begin
+		casex (cache_byte)
+			OP_ADX: begin
+				// Set flags
+				sfr[OV] <= (~(regs[src_reg] ^ (alt2 ? regs[imm] : imm))
+							& ((alt2 ? regs[imm] : imm) ^ res17)
+							& 16'h8000) != 0;
+				sfr[S]  <= (res17 & 16'h8000) != 0;
+				sfr[CY] <= res17 >= 17'h10000;
+				sfr[Z]  <= (res17 & 16'hffff) == 0;
 
-wire [8:0] RESOLVED_CACHE_ADDR = (ADDR[9:0] + cbr) & 9'h1ff;
+				// Set result
+				// XXX: what if dst_reg > 13?
+				regs[dst_reg] <= res17;
+
+				// Register reset
+				sfr[B]    <= 1'b0;
+				sfr[ALT1] <= 1'b0;
+				sfr[ALT2] <= 1'b0;
+				src_reg  <= 3'h0;
+				dst_reg  <= 3'h0;
+			end
+		endcase
+		pc <= pc + 1;
+		state <= sfr[G] ? STATE_FETCH1 : STATE_IDLE;
+	end
+	endcase
+end
 
 always @(posedge clkin) begin
 	casex (ADDR[9:0])
@@ -390,7 +384,7 @@ always @(posedge clkin) begin
 
 		// Status flag register
 		10'h030: MMIO_DOr <= sfr[7:0];
-		10'h031: MMIO_DOr <= sfr[15:8];
+		10'h031: MMIO_DOr <= sfr[15:8]; // TODO: should reset IRQ flag
 
 		//10'h032: Unused
 
@@ -430,100 +424,15 @@ always @(posedge clkin) begin
 		// Color register: no access from SNES CPU
 		// Plot option register: no access from SNES CPU
 
-		// Cache RAM
-		10'h1xx, 10'h2xx: MMIO_DOr <= cache[RESOLVED_CACHE_ADDR];
-
 		default: MMIO_DOr <= 8'hff;
 	endcase
 end
 
 always @(posedge clkin) begin
-	if (MMIO_WR_EN) begin
-		casex (ADDR[9:0])
-			10'h000: regs_mmio[0][7:0] <= DI;
-			10'h001: regs_mmio[0][15:8] <= DI;
-			10'h002: regs_mmio[1][7:0] <= DI;
-			10'h003: regs_mmio[1][15:8] <= DI;
-			10'h004: regs_mmio[2][7:0] <= DI;
-			10'h005: regs_mmio[2][15:8] <= DI;
-			10'h006: regs_mmio[3][7:0] <= DI;
-			10'h007: regs_mmio[3][15:8] <= DI;
-			10'h008: regs_mmio[4][7:0] <= DI;
-			10'h009: regs_mmio[4][15:8] <= DI;
-			10'h00a: regs_mmio[5][7:0] <= DI;
-			10'h00b: regs_mmio[5][15:8] <= DI;
-			10'h00c: regs_mmio[6][7:0] <= DI;
-			10'h00d: regs_mmio[6][15:8] <= DI;
-			10'h00e: regs_mmio[7][7:0] <= DI;
-			10'h00f: regs_mmio[7][15:8] <= DI;
-			10'h010: regs_mmio[8][7:0] <= DI;
-			10'h011: regs_mmio[8][15:8] <= DI;
-			10'h012: regs_mmio[9][7:0] <= DI;
-			10'h013: regs_mmio[9][15:8] <= DI;
-			10'h014: regs_mmio[10][7:0] <= DI;
-			10'h015: regs_mmio[10][15:8] <= DI;
-			10'h016: regs_mmio[11][7:0] <= DI;
-			10'h017: regs_mmio[11][15:8] <= DI;
-			10'h018: regs_mmio[12][7:0] <= DI;
-			10'h019: regs_mmio[12][15:8] <= DI;
-			10'h01a: regs_mmio[13][7:0] <= DI;
-			10'h01b: regs_mmio[13][15:8] <= DI;
-			10'h01c: rap_mmio[7:0] <= DI;
-			10'h01d: rap_mmio[15:8] <= DI;
-			10'h01e: pc_mmio[7:0] <= DI;
-			10'h01f: pc_mmio[15:8] <= DI;
-
-			// Status flag register
-			10'h030: sfr_mmio[7:0] <= {1'b0, DI[6:1], 1'b0};
-			10'h031: sfr_mmio[15:8] <= {DI[7], 2'b00, DI[4:0]};
-
-			//10'h032: Unused
-
-			// Back-up RAM register
-			10'h033: bramr_mmio <= DI[0];
-
-			// Program bank register
-			10'h034: pbr_mmio <= DI;
-
-			// Game Pak ROM bank register: read only
-			//10'h036: rombr <= DI;
-
-			// Config register:
-			10'h037: cfgr_mmio <= {DI[7], 1'b0, DI[5], 5'b00000};
-
-			// Screen base register
-			10'h038: scbr_mmio <= DI;
-
-			// Clock select register
-			10'h039: clsr_mmio <= DI[0];
-
-			// Screen mode register
-			10'h03a: scmr_mmio <= DI[5:0];
-
-			// Version code register: read only
-			//10'h03b: vcr <= DI;
-
-			// Game Pak RAM bank register: read only
-			//10'h03c: rambr <= DI[0];
-
-			//10'h03d: Unused
-
-			// Cache base register: read only
-			//10'h03e: cbr[7:0] <= {DI[7:4], 4'b0000};
-			//10'h03f: cbr[15:8] <= DI;
-
-			// Color register: no access from SNES CPU
-			// Plot option register: no access from SNES CPU
-
-			// Cache RAM
-			10'h1xx, 10'h2xx: begin
-				cache[RESOLVED_CACHE_ADDR] <= DI;
-				if (ADDR[0]) begin
-					cache_flags[RESOLVED_CACHE_ADDR[8:4]] <= 1'b1;
-				end
-			end
-		endcase
-	end
+	casex (ADDR[9:0])
+		// Cache RAM
+		10'h1xx, 10'h2xx: CACHE_DOr = cache[RESOLVED_CACHE_ADDR];
+	endcase
 end
 
 endmodule
